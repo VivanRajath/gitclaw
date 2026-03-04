@@ -100,6 +100,15 @@ export interface GCToolDefinition {
 	handler: (args: any, signal?: AbortSignal) => Promise<string | { text: string; details?: any }>;
 }
 
+// ── Local repo options ──────────────────────────────────────────────────
+
+export interface LocalRepoOptions {
+	url: string;
+	token: string;
+	dir?: string;
+	session?: string;
+}
+
 // ── Sandbox options ─────────────────────────────────────────────────────
 
 export interface SandboxOptions {
@@ -126,6 +135,7 @@ export interface QueryOptions {
 	replaceBuiltinTools?: boolean;
 	allowedTools?: string[];
 	disallowedTools?: string[];
+	repo?: LocalRepoOptions;
 	sandbox?: SandboxOptions | boolean;
 	hooks?: GCHooks;
 	maxTurns?: number;

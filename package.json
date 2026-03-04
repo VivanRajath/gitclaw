@@ -1,6 +1,6 @@
 {
   "name": "gitclaw",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A universal git-native agent powered by pi-agent-core",
   "type": "module",
   "main": "./dist/exports.js",

@@ -16,6 +16,8 @@ import { formatComplianceWarnings } from "./compliance.js";
 import { readFile, mkdir, writeFile, stat, access } from "fs/promises";
 import { join, resolve } from "path";
 import { execSync } from "child_process";
+import { initLocalSession } from "./session.js";
+import type { LocalSession } from "./session.js";
 
 // ANSI helpers
 const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
@@ -31,6 +33,9 @@ interface ParsedArgs {
 	sandbox?: boolean;
 	sandboxRepo?: string;
 	sandboxToken?: string;
+	repo?: string;
+	pat?: string;
+	session?: string;
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
@@ -42,6 +47,9 @@ function parseArgs(argv: string[]): ParsedArgs {
 	let sandbox = false;
 	let sandboxRepo: string | undefined;
 	let sandboxToken: string | undefined;
+	let repo: string | undefined;
+	let pat: string | undefined;
+	let session: string | undefined;
 
 	for (let i = 0; i < args.length; i++) {
 		switch (args[i]) {
@@ -71,6 +79,16 @@ function parseArgs(argv: string[]): ParsedArgs {
 			case "--sandbox-token":
 				sandboxToken = args[++i];
 				break;
+			case "--repo":
+			case "-r":
+				repo = args[++i];
+				break;
+			case "--pat":
+				pat = args[++i];
+				break;
+			case "--session":
+				session = args[++i];
+				break;
 			default:
 				if (!args[i].startsWith("-")) {
 					prompt = args[i];
@@ -79,7 +97,7 @@ function parseArgs(argv: string[]): ParsedArgs {
 		}
 	}
 
-	return { model, dir, prompt, env, sandbox, sandboxRepo, sandboxToken };
+	return { model, dir, prompt, env, sandbox, sandboxRepo, sandboxToken, repo, pat, session };
 }
 
 function handleEvent(
@@ -257,11 +275,41 @@ async function ensureRepo(dir: string, model?: string): Promise<string> {
 }
 
 async function main(): Promise<void> {
-	const { model, dir: rawDir, prompt, env, sandbox: useSandbox, sandboxRepo, sandboxToken } = parseArgs(process.argv);
+	const { model, dir: rawDir, prompt, env, sandbox: useSandbox, sandboxRepo, sandboxToken, repo, pat, session: sessionBranch } = parseArgs(process.argv);
 
-	// If no --dir given interactively, ask for it
+	// If --repo is given, derive a default dir from the repo URL (skip interactive prompt)
 	let dir = rawDir;
-	if (dir === process.cwd() && !prompt) {
+	let localSession: LocalSession | undefined;
+
+	if (repo) {
+		// Validate mutually exclusive flags
+		if (useSandbox) {
+			console.error(red("Error: --repo and --sandbox are mutually exclusive"));
+			process.exit(1);
+		}
+
+		const token = pat || process.env.GITHUB_TOKEN || process.env.GIT_TOKEN;
+		if (!token) {
+			console.error(red("Error: --pat, GITHUB_TOKEN, or GIT_TOKEN is required with --repo"));
+			process.exit(1);
+		}
+
+		// Default dir: /tmp/gitclaw/<repo-name> if no --dir given
+		if (dir === process.cwd()) {
+			const repoName = repo.split("/").pop()?.replace(/\.git$/, "") || "repo";
+			dir = resolve(`/tmp/gitclaw/${repoName}`);
+		}
+
+		localSession = initLocalSession({
+			url: repo,
+			token,
+			dir,
+			session: sessionBranch,
+		});
+		dir = localSession.dir;
+		console.log(dim(`Local session: ${localSession.branch} (${localSession.dir})`));
+	} else if (dir === process.cwd() && !prompt) {
+		// No --repo: interactive prompt for dir
 		const answer = await askQuestion(green("? ") + bold("Repository path") + dim(" (. for current dir)") + green(": "));
 		if (answer) {
 			dir = resolve(answer === "." ? process.cwd() : answer);
@@ -282,8 +330,10 @@ async function main(): Promise<void> {
 		console.log(dim(`Sandbox ready (repo: ${sandboxCtx.repoPath})`));
 	}
 
-	// Ensure the target is a valid gitclaw repo (skip in sandbox mode — gitmachine clones the repo)
-	if (!useSandbox) {
+	// Ensure the target is a valid gitclaw repo (skip in sandbox/local-repo mode)
+	if (localSession) {
+		// Already cloned and scaffolded by initLocalSession
+	} else if (!useSandbox) {
 		dir = await ensureRepo(dir, model);
 	} else {
 		dir = resolve(dir);
@@ -420,6 +470,10 @@ async function main(): Promise<void> {
 			}
 			throw err;
 		} finally {
+			if (localSession) {
+				console.log(dim("Finalizing session..."));
+				localSession.finalize();
+			}
 			if (sandboxCtx) {
 				console.log(dim("Stopping sandbox..."));
 				await sandboxCtx.gitMachine.stop();
@@ -445,6 +499,10 @@ async function main(): Promise<void> {
 
 			if (trimmed === "/quit" || trimmed === "/exit") {
 				rl.close();
+				if (localSession) {
+					console.log(dim("Finalizing session..."));
+					localSession.finalize();
+				}
 				await stopSandbox();
 				process.exit(0);
 			}
@@ -523,6 +581,9 @@ async function main(): Promise<void> {
 		} else {
 			console.log("\nBye!");
 			rl.close();
+			if (localSession) {
+				try { localSession.finalize(); } catch { /* best-effort */ }
+			}
 			stopSandbox().finally(() => process.exit(0));
 		}
 	});

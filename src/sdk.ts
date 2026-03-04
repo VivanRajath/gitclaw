@@ -10,6 +10,8 @@ import { loadHooksConfig, runHooks, wrapToolWithHooks } from "./hooks.js";
 import { loadDeclarativeTools } from "./tool-loader.js";
 import { buildTypeboxSchema } from "./tool-loader.js";
 import { wrapToolWithProgrammaticHooks } from "./sdk-hooks.js";
+import { initLocalSession } from "./session.js";
+import type { LocalSession } from "./session.js";
 import type {
 	GCMessage,
 	GCAssistantMessage,
@@ -120,10 +122,32 @@ export function query(options: QueryOptions): Query {
 
 	// Sandbox context (hoisted for cleanup in catch)
 	let sandboxCtx: SandboxContext | undefined;
+	// Local session (hoisted for cleanup in catch)
+	let localSession: LocalSession | undefined;
 
 	// Async initialization + run
 	const runPromise = (async () => {
-		const dir = options.dir ?? process.cwd();
+		// Validate mutually exclusive options
+		if (options.repo && options.sandbox) {
+			throw new Error("repo and sandbox options are mutually exclusive");
+		}
+
+		let dir = options.dir ?? process.cwd();
+
+		// Local repo mode
+		if (options.repo) {
+			const token = options.repo.token || process.env.GITHUB_TOKEN || process.env.GIT_TOKEN;
+			if (!token) {
+				throw new Error("repo.token, GITHUB_TOKEN, or GIT_TOKEN is required with repo option");
+			}
+			localSession = initLocalSession({
+				url: options.repo.url,
+				token,
+				dir: options.repo.dir || dir,
+				session: options.repo.session,
+			});
+			dir = localSession.dir;
+		}
 
 		// 1. Load agent
 		const loaded = await loadAgent(dir, options.model, options.env);
@@ -397,6 +421,11 @@ export function query(options: QueryOptions): Query {
 			}
 		}
 
+		// Finalize local session if active
+		if (localSession) {
+			try { localSession.finalize(); } catch { /* best-effort */ }
+		}
+
 		// Stop sandbox if active
 		if (sandboxCtx) {
 			await sandboxCtx.gitMachine.stop().catch(() => {});
@@ -405,6 +434,11 @@ export function query(options: QueryOptions): Query {
 		// Ensure channel finishes even if no agent_end event
 		channel.finish();
 	})().catch(async (err) => {
+		// Finalize local session on error
+		if (localSession) {
+			try { localSession.finalize(); } catch { /* best-effort */ }
+		}
+
 		// Stop sandbox on error
 		if (sandboxCtx) {
 			await sandboxCtx.gitMachine.stop().catch(() => {});

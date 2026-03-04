@@ -5,6 +5,7 @@ export { query, tool } from "./sdk.js";
 export type {
 	Query,
 	QueryOptions,
+	LocalRepoOptions,
 	SandboxOptions,
 	GCMessage,
 	GCAssistantMessage,
@@ -31,6 +32,10 @@ export type { EnvConfig } from "./config.js";
 // Sandbox
 export type { SandboxConfig, SandboxContext } from "./sandbox.js";
 export { createSandboxContext } from "./sandbox.js";
+
+// Session
+export type { LocalSession } from "./session.js";
+export { initLocalSession } from "./session.js";
 
 // Loader (escape hatch)
 export { loadAgent } from "./loader.js";
