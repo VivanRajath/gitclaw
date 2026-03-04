@@ -23,13 +23,25 @@ const bold = (s: string) => `\x1b[1m${s}\x1b[0m`;
 const red = (s: string) => `\x1b[31m${s}\x1b[0m`;
 const green = (s: string) => `\x1b[32m${s}\x1b[0m`;
 
-function parseArgs(argv: string[]): { model?: string; dir: string; prompt?: string; env?: string; sandbox?: boolean } {
+interface ParsedArgs {
+	model?: string;
+	dir: string;
+	prompt?: string;
+	env?: string;
+	sandbox?: boolean;
+	sandboxRepo?: string;
+	sandboxToken?: string;
+}
+
+function parseArgs(argv: string[]): ParsedArgs {
 	const args = argv.slice(2);
 	let model: string | undefined;
 	let dir = process.cwd();
 	let prompt: string | undefined;
 	let env: string | undefined;
 	let sandbox = false;
+	let sandboxRepo: string | undefined;
+	let sandboxToken: string | undefined;
 
 	for (let i = 0; i < args.length; i++) {
 		switch (args[i]) {
@@ -53,6 +65,12 @@ function parseArgs(argv: string[]): { model?: string; dir: string; prompt?: stri
 			case "-s":
 				sandbox = true;
 				break;
+			case "--sandbox-repo":
+				sandboxRepo = args[++i];
+				break;
+			case "--sandbox-token":
+				sandboxToken = args[++i];
+				break;
 			default:
 				if (!args[i].startsWith("-")) {
 					prompt = args[i];
@@ -61,7 +79,7 @@ function parseArgs(argv: string[]): { model?: string; dir: string; prompt?: stri
 		}
 	}
 
-	return { model, dir, prompt, env, sandbox };
+	return { model, dir, prompt, env, sandbox, sandboxRepo, sandboxToken };
 }
 
 function handleEvent(
@@ -239,7 +257,7 @@ async function ensureRepo(dir: string, model?: string): Promise<string> {
 }
 
 async function main(): Promise<void> {
-	const { model, dir: rawDir, prompt, env, sandbox: useSandbox } = parseArgs(process.argv);
+	const { model, dir: rawDir, prompt, env, sandbox: useSandbox, sandboxRepo, sandboxToken } = parseArgs(process.argv);
 
 	// If no --dir given interactively, ask for it
 	let dir = rawDir;
@@ -253,7 +271,11 @@ async function main(): Promise<void> {
 	// Create sandbox context if --sandbox flag is set
 	let sandboxCtx: SandboxContext | undefined;
 	if (useSandbox) {
-		const sandboxConfig: SandboxConfig = { provider: "e2b" };
+		const sandboxConfig: SandboxConfig = {
+			provider: "e2b",
+			repository: sandboxRepo,
+			token: sandboxToken,
+		};
 		sandboxCtx = await createSandboxContext(sandboxConfig, resolve(dir));
 		console.log(dim("Starting sandbox VM..."));
 		await sandboxCtx.gitMachine.start();
