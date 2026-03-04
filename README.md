@@ -1,4 +1,8 @@
 <p align="center">
+  <img src="./GitClaw.png" alt="GitClaw Logo" width="200" />
+</p>
+
+<p align="center">
   <img src="https://img.shields.io/npm/v/gitclaw?style=flat-square&color=blue" alt="npm version" />
   <img src="https://img.shields.io/badge/node-%3E%3D20-brightgreen?style=flat-square" alt="node version" />
   <img src="https://img.shields.io/github/license/open-gitagent/gitclaw?style=flat-square" alt="license" />
