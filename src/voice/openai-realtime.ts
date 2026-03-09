@@ -67,7 +67,7 @@ export class OpenAIRealtimeAdapter implements VoiceAdapter {
 			type: "session.update",
 			session: {
 				instructions,
-				voice: this.config.voice || "alloy",
+				voice: this.config.voice || "ash",
 				turn_detection: { type: "server_vad" },
 				input_audio_transcription: { model: "whisper-1" },
 				tools: [

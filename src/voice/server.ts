@@ -11,7 +11,7 @@ const bold = (s: string) => `\x1b[1m${s}\x1b[0m`;
 export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => Promise<void>> {
 	const port = opts.port || 3333;
 	const apiKey = opts.adapterConfig.apiKey;
-	const voiceName = opts.adapterConfig.voice || "alloy";
+	const voiceName = opts.adapterConfig.voice || "ash";
 	const realtimeModel = opts.adapterConfig.model || "gpt-4o-realtime-preview";
 
 	// Tool handler: runs gitclaw query and collects response text
