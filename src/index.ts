@@ -380,10 +380,15 @@ async function main(): Promise<void> {
 			env,
 		});
 
-		process.on("SIGINT", async () => {
+		let stopping = false;
+		process.on("SIGINT", () => {
+			if (stopping) {
+				// Second Ctrl+C — force exit immediately
+				process.exit(1);
+			}
+			stopping = true;
 			console.log("\nDisconnecting...");
-			await cleanup();
-			process.exit(0);
+			cleanup().finally(() => process.exit(0));
 		});
 
 		// Keep process alive

@@ -133,9 +133,13 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 	console.log(dim(`[voice] Open http://localhost:${port} in your browser`));
 
 	return async () => {
+		// Force-close all open WebSocket connections so the HTTP server can shut down
+		for (const client of wss.clients) {
+			client.terminate();
+		}
 		wss.close();
-		await new Promise<void>((resolve, reject) => {
-			httpServer.close((err) => (err ? reject(err) : resolve()));
+		await new Promise<void>((resolve) => {
+			httpServer.close(() => resolve());
 		});
 		console.log(dim("[voice] Server stopped"));
 	};
