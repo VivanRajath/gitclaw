@@ -51,8 +51,11 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 			let composioTools: GCToolDefinition[] = [];
 			if (composioAdapter) {
 				try {
-					// Dynamically fetch only the tools relevant to the user's prompt
+					// Try semantic search first, fall back to all connected tools
 					composioTools = await composioAdapter.getToolsForQuery(prompt);
+					if (composioTools.length === 0) {
+						composioTools = await composioAdapter.getTools();
+					}
 				} catch { /* non-fatal */ }
 			}
 

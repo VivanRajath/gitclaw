@@ -68,20 +68,38 @@ export class ComposioClient {
 	}
 
 	// Search tools across connected toolkits by natural language query
+	// Makes parallel per-toolkit requests since the API doesn't support comma-separated toolkit_slug with query
 	async searchTools(query: string, toolkitSlugs?: string[], limit = 10): Promise<ComposioTool[]> {
-		const params = new URLSearchParams({ query, limit: String(limit) });
-		if (toolkitSlugs?.length) {
-			params.set("toolkit_slug", toolkitSlugs.join(","));
-		}
-		const resp = await this.request<any>("GET", `/tools?${params}`);
-		const tools: any[] = Array.isArray(resp) ? resp : (resp.items ?? resp.tools ?? []);
-		return tools.map((t: any) => ({
+		const mapTool = (t: any): ComposioTool => ({
 			name: t.name ?? t.enum ?? "",
 			slug: t.slug ?? t.enum ?? t.name ?? "",
 			description: t.description ?? "",
 			toolkitSlug: t.toolkit?.slug ?? t.toolkit_slug ?? "",
 			parameters: t.input_parameters ?? t.parameters ?? t.inputParameters ?? {},
-		}));
+		});
+
+		if (!toolkitSlugs?.length) {
+			const params = new URLSearchParams({ query, limit: String(limit) });
+			const resp = await this.request<any>("GET", `/tools?${params}`);
+			const tools: any[] = Array.isArray(resp) ? resp : (resp.items ?? resp.tools ?? []);
+			return tools.map(mapTool);
+		}
+
+		// Parallel per-toolkit search
+		const perToolkit = await Promise.all(
+			toolkitSlugs.map(async (slug) => {
+				try {
+					const params = new URLSearchParams({ query, toolkit_slug: slug, limit: String(limit) });
+					const resp = await this.request<any>("GET", `/tools?${params}`);
+					const tools: any[] = Array.isArray(resp) ? resp : (resp.items ?? resp.tools ?? []);
+					return tools.map(mapTool);
+				} catch {
+					return [] as ComposioTool[];
+				}
+			}),
+		);
+
+		return perToolkit.flat().slice(0, limit);
 	}
 
 	// List tools for a specific toolkit
