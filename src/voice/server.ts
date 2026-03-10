@@ -56,7 +56,12 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 					if (composioTools.length === 0) {
 						composioTools = await composioAdapter.getTools();
 					}
-				} catch { /* non-fatal */ }
+					console.log(dim(`[voice] Composio: ${composioTools.length} tools injected: ${composioTools.map(t => t.name).join(", ")}`));
+				} catch (err: any) {
+					console.error(dim(`[voice] Composio tool fetch failed: ${err.message}`));
+				}
+			} else {
+				console.log(dim("[voice] Composio adapter not initialized"));
 			}
 
 			const result = query({
