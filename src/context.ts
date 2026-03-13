@@ -66,10 +66,20 @@ function loadRecentChat(agentDir: string, branch: string, maxMessages: number = 
 	return lines.join("\n");
 }
 
+/** Read the last few mood entries */
+function readRecentMood(agentDir: string, maxEntries: number = 5): string {
+	const path = join(agentDir, "memory", "mood.md");
+	const content = safeRead(path);
+	if (!content) return "";
+	const lines = content.split("\n").filter((l) => l.startsWith("- "));
+	return lines.slice(-maxEntries).join("\n");
+}
+
 export interface ContextSnapshot {
 	memory: string;
 	summary: string;
 	recentChat: string;
+	recentMood: string;
 }
 
 /** Read MEMORY.md + chat-summary + recent chat, returns raw content */
@@ -78,6 +88,7 @@ export async function getContextSnapshot(agentDir: string, branch: string): Prom
 		memory: findMemory(agentDir),
 		summary: readSummary(agentDir, branch),
 		recentChat: loadRecentChat(agentDir, branch),
+		recentMood: readRecentMood(agentDir),
 	};
 }
 
@@ -88,11 +99,14 @@ export async function getContextSnapshot(agentDir: string, branch: string): Prom
  * knows what just happened even when the WebSocket reconnects.
  */
 export async function getVoiceContext(agentDir: string, branch: string): Promise<string> {
-	const { memory, summary, recentChat } = await getContextSnapshot(agentDir, branch);
+	const { memory, summary, recentChat, recentMood } = await getContextSnapshot(agentDir, branch);
 	const parts: string[] = [];
 
 	if (memory) {
 		parts.push(`[What you know about the user]\n${truncateToTokens(memory, 300)}`);
+	}
+	if (recentMood) {
+		parts.push(`[User's recent mood patterns — adapt your tone accordingly]\n${recentMood}`);
 	}
 	if (summary) {
 		parts.push(`[Previous session summary]\n${truncateToTokens(summary, 150)}`);

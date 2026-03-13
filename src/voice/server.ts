@@ -2,9 +2,10 @@ import { createServer, type Server, type IncomingMessage, type ServerResponse } 
 import { WebSocketServer, WebSocket as WS } from "ws";
 import { query } from "../sdk.js";
 import type { VoiceServerOptions, ClientMessage, ServerMessage, MultimodalAdapter } from "./adapter.js";
-import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, mkdirSync } from "fs";
+import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, mkdirSync, appendFileSync } from "fs";
 import { execSync } from "child_process";
 import { join, dirname, resolve, relative } from "path";
+import { writeFile, readFile, mkdir, stat } from "fs/promises";
 import { fileURLToPath } from "url";
 import { OpenAIRealtimeAdapter } from "./openai-realtime.js";
 import { GeminiLiveAdapter } from "./gemini-live.js";
@@ -32,11 +33,235 @@ function isMemoryWorthy(text: string): boolean {
 	return MEMORY_PATTERNS.some((p) => p.test(text));
 }
 
+// ── Moment detection for photo capture ─────────────────────────────────
+const MOMENT_PATTERNS = [
+	/\bhaha\b/i,
+	/\blol\b/i,
+	/\blmao\b/i,
+	/\blove it\b/i,
+	/\bthat'?s amazing\b/i,
+	/\bso happy\b/i,
+	/\bbest day\b/i,
+	/\bwe did it\b/i,
+	/\bnailed it\b/i,
+	/\blet'?s go\b/i,
+	/\bhell yeah\b/i,
+	/\bawesome\b/i,
+	/\bthank you so much\b/i,
+	/\bfirst time\b/i,
+	/\bmilestone\b/i,
+	/\bcelebrat/i,
+	/\bincredible\b/i,
+];
+
+function isMomentWorthy(text: string): boolean {
+	return MOMENT_PATTERNS.some((p) => p.test(text));
+}
+
+const PHOTOS_DIR = "memory/photos";
+const INDEX_FILE = "memory/photos/INDEX.md";
+const LATEST_FRAME_FILE = "memory/.latest-frame.jpg";
+const LATEST_SCREEN_FILE = "memory/.latest-screen.jpg";
+
+function slugify(text: string): string {
+	return text
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/^-|-$/g, "")
+		.slice(0, 40);
+}
+
+// ── Mood tracking ──────────────────────────────────────────────────────
+type Mood = "happy" | "frustrated" | "curious" | "excited" | "calm";
+const MOOD_SIGNALS: { mood: Mood; patterns: RegExp[] }[] = [
+	{ mood: "happy", patterns: [/\bhaha\b/i, /\blol\b/i, /\blove it\b/i, /\bthat'?s great\b/i, /\bnice\b/i, /\bawesome\b/i, /\bamazing\b/i] },
+	{ mood: "frustrated", patterns: [/\bugh\b/i, /\bwhat the\b/i, /\bdamn\b/i, /\bstill broken\b/i, /\bnot working\b/i, /\bwhy (?:is|does|won'?t)\b/i, /\bfuck\b/i] },
+	{ mood: "curious", patterns: [/\bhow (?:do|does|can|would)\b/i, /\bwhat (?:is|are|if)\b/i, /\bwhy (?:do|does|is)\b/i, /\bexplain\b/i, /\btell me about\b/i] },
+	{ mood: "excited", patterns: [/\blet'?s go\b/i, /\bhell yeah\b/i, /\bwe did it\b/i, /\bnailed it\b/i, /\byes!\b/i, /\bfinally\b/i] },
+	{ mood: "calm", patterns: [/\bokay\b/i, /\bsure\b/i, /\bcool\b/i, /\bsounds good\b/i, /\bgot it\b/i] },
+];
+
+function detectMood(text: string): Mood | null {
+	for (const { mood, patterns } of MOOD_SIGNALS) {
+		if (patterns.some((p) => p.test(text))) return mood;
+	}
+	return null;
+}
+
+interface MoodCounts { happy: number; frustrated: number; curious: number; excited: number; calm: number }
+
+function dominantMood(counts: MoodCounts): Mood {
+	let best: Mood = "calm";
+	let max = 0;
+	for (const [mood, count] of Object.entries(counts) as [Mood, number][]) {
+		if (count > max) { max = count; best = mood; }
+	}
+	return best;
+}
+
+async function saveMoodEntry(agentDir: string, counts: MoodCounts, messageCount: number): Promise<void> {
+	if (messageCount < 3) return; // Skip trivially short sessions
+
+	const now = new Date();
+	const pad = (n: number) => String(n).padStart(2, "0");
+	const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+	const time = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+	const mood = dominantMood(counts);
+
+	const moodPath = join(agentDir, "memory", "mood.md");
+	let existing = "";
+	try { existing = await readFile(moodPath, "utf-8"); } catch {
+		existing = "# Mood Log\n\n";
+	}
+
+	const detail = Object.entries(counts).filter(([, v]) => v > 0).map(([k, v]) => `${k}:${v}`).join(" ");
+	existing += `- ${date} ${time} — **${mood}** (${detail}) [${messageCount} msgs]\n`;
+
+	await mkdir(join(agentDir, "memory"), { recursive: true });
+	await writeFile(moodPath, existing, "utf-8");
+
+	try {
+		execSync(`git add "memory/mood.md" && git commit -m "Mood: ${mood} session (${date} ${time})"`, {
+			cwd: agentDir, stdio: "pipe",
+		});
+	} catch { /* file saved even if commit fails */ }
+}
+
+// ── Session journaling ─────────────────────────────────────────────────
+async function writeJournalEntry(
+	agentDir: string,
+	branch: string,
+	moodCounts: MoodCounts,
+	model?: string,
+	env?: string,
+): Promise<void> {
+	const messages = loadHistory(agentDir, branch);
+	if (messages.length < 5) return;
+
+	const lines: string[] = [];
+	for (const msg of messages.slice(-50)) {
+		if (msg.type === "transcript") lines.push(`${msg.role}: ${msg.text}`);
+		else if (msg.type === "agent_done") lines.push(`agent: ${msg.result.slice(0, 200)}`);
+	}
+	if (lines.length < 3) return;
+
+	let transcript = lines.join("\n");
+	if (transcript.length > 3000) transcript = transcript.slice(-3000);
+
+	const mood = dominantMood(moodCounts);
+	const prompt = `Write a brief journal entry (3-5 sentences) reflecting on this conversation session. Mood was mostly: ${mood}. Note what was accomplished, any unfinished threads, and how the user seemed. Write in first person as the agent. Be genuine, not corporate.\n\nTranscript:\n${transcript}`;
+
+	try {
+		const result = query({
+			prompt,
+			dir: agentDir,
+			model,
+			env,
+			maxTurns: 1,
+			replaceBuiltinTools: true,
+			tools: [],
+			systemPrompt: "You are journaling about your day as an AI assistant. Write naturally and briefly.",
+		});
+
+		let entry = "";
+		for await (const msg of result) {
+			if (msg.type === "assistant" && msg.content) entry += msg.content;
+		}
+		entry = entry.trim();
+		if (!entry) return;
+
+		const now = new Date();
+		const pad = (n: number) => String(n).padStart(2, "0");
+		const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+		const time = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+
+		const journalDir = join(agentDir, "memory", "journal");
+		await mkdir(journalDir, { recursive: true });
+		const journalPath = join(journalDir, `${date}.md`);
+
+		let existing = "";
+		try { existing = await readFile(journalPath, "utf-8"); } catch {
+			existing = `# Journal — ${date}\n\n`;
+		}
+		existing += `### ${time} (${mood})\n${entry}\n\n`;
+		await writeFile(journalPath, existing, "utf-8");
+
+		try {
+			execSync(`git add "memory/journal/${date}.md" && git commit -m "Journal: ${date} ${time} session reflection"`, {
+				cwd: agentDir, stdio: "pipe",
+			});
+			console.error(dim(`[voice] Journal entry written for ${date} ${time}`));
+		} catch { /* saved even if commit fails */ }
+	} catch (err: any) {
+		console.error(dim(`[voice] Journal write failed: ${err.message}`));
+	}
+}
+
+async function capturePhoto(
+	agentDir: string,
+	reason: string,
+	frameData?: Buffer,
+): Promise<void> {
+	// If no frame passed directly, read from temp file
+	let frame = frameData;
+	if (!frame) {
+		const framePath = join(agentDir, LATEST_FRAME_FILE);
+		try {
+			const frameStat = await stat(framePath);
+			if (Date.now() - frameStat.mtimeMs > 5000) {
+				console.error(dim("[voice] No recent camera frame, skipping photo capture"));
+				return;
+			}
+			frame = await readFile(framePath);
+		} catch {
+			console.error(dim("[voice] No camera frame available, skipping photo capture"));
+			return;
+		}
+	}
+
+	const now = new Date();
+	const pad = (n: number) => String(n).padStart(2, "0");
+	const datePart = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+	const timePart = `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+	const slug = slugify(reason);
+	const filename = `${datePart}_${timePart}_${slug}.jpg`;
+	const photoRelPath = `${PHOTOS_DIR}/${filename}`;
+	const photoAbsPath = join(agentDir, photoRelPath);
+
+	await mkdir(join(agentDir, PHOTOS_DIR), { recursive: true });
+	await writeFile(photoAbsPath, frame);
+
+	// Update INDEX.md
+	const indexPath = join(agentDir, INDEX_FILE);
+	let indexContent = "";
+	try {
+		indexContent = await readFile(indexPath, "utf-8");
+	} catch {
+		indexContent = "# Memorable Moments\n\nPhotos captured during happy and memorable moments.\n\n";
+	}
+	const entry = `- **${datePart} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}** — ${reason} → [\`${filename}\`](${filename})\n`;
+	indexContent += entry;
+	await writeFile(indexPath, indexContent, "utf-8");
+
+	// Git add + commit
+	const commitMsg = `Capture moment: ${reason}`;
+	try {
+		execSync(`git add "${photoRelPath}" "${INDEX_FILE}" && git commit -m "${commitMsg.replace(/"/g, '\\"')}"`, {
+			cwd: agentDir,
+			stdio: "pipe",
+		});
+		console.error(dim(`[voice] Photo captured: ${filename}`));
+	} catch (err: any) {
+		console.error(dim(`[voice] Photo saved but git commit failed: ${err.stderr?.toString().trim() || "unknown"}`));
+	}
+}
+
 function saveMemoryInBackground(
 	text: string,
 	agentDir: string,
 	model?: string,
 	env?: string,
+	onComplete?: () => void,
 ): void {
 	const prompt = `The user just said: "${text}"\n\nSave any personal information, preferences, or facts about the user to memory. Use the memory tool to write or update a memory file. Use a descriptive commit message like "Remember: user likes mustangs" or "Save preference: favorite game is GTA 5". Be concise. If there's nothing meaningful to save, do nothing.`;
 	console.error(dim(`[voice] Background memory save triggered for: "${text.slice(0, 60)}..."`));
@@ -58,6 +283,7 @@ function saveMemoryInBackground(
 				}
 			}
 			console.error(dim("[voice/memory] Background save complete"));
+			if (onComplete) onComplete();
 		} catch (err: any) {
 			console.error(dim(`[voice/memory] Background save failed: ${err.message}`));
 		}
@@ -122,7 +348,13 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 	loadEnvFile(resolve(opts.agentDir));
 
 	const port = opts.port || 3333;
-	const uiHtml = loadUIHtml();
+	let agentName = "GitClaw";
+	try {
+		const yamlRaw = readFileSync(join(resolve(opts.agentDir), "agent.yaml"), "utf-8");
+		const m = yamlRaw.match(/^name:\s*(.+)$/m);
+		if (m) agentName = m[1].trim();
+	} catch { /* fallback to default */ }
+	const uiHtml = loadUIHtml().replace(/\{\{AGENT_NAME\}\}/g, agentName);
 
 	// Creates a per-connection tool handler that can stream events to the browser
 	function createToolHandler(sendToBrowser: (msg: ServerMessage) => void) {
@@ -218,6 +450,7 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 	const HIDDEN_DIRS = new Set([".git", "node_modules", ".gitagent", "dist", ".next", "__pycache__", ".venv"]);
 	const agentRoot = resolve(opts.agentDir);
 	let activeBranch = execSync("git rev-parse --abbrev-ref HEAD", { cwd: agentRoot, encoding: "utf-8" }).trim();
+	const pendingShutdownWork: Promise<any>[] = [];
 
 	// ── Composio integration (optional) ────────────────────────────────
 	let composioAdapter: ComposioAdapter | null = null;
@@ -240,6 +473,7 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 		name: string;
 		path: string;
 		type: "file" | "directory";
+		mtime?: number;
 		children?: FileEntry[];
 	}
 
@@ -263,7 +497,7 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 							children: listDir(fullPath, depth + 1),
 						});
 					} else if (st.isFile()) {
-						result.push({ name, path: relPath, type: "file" });
+						result.push({ name, path: relPath, type: "file", mtime: st.mtimeMs });
 					}
 				} catch {
 					// skip unreadable entries
@@ -334,6 +568,29 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 				if (st.size > 1024 * 1024) return jsonReply(res, 413, { error: "File too large (>1MB)" });
 				const content = readFileSync(abs, "utf-8");
 				jsonReply(res, 200, { path: reqPath, content });
+			} catch (err: any) {
+				jsonReply(res, 500, { error: err.message });
+			}
+
+		} else if (url.pathname === "/api/file/raw" && req.method === "GET") {
+			// Serve raw file with correct MIME type (for images, etc.)
+			const reqPath = url.searchParams.get("path");
+			if (!reqPath) return jsonReply(res, 400, { error: "Missing path param" });
+			const abs = safePath(reqPath);
+			if (!abs) return jsonReply(res, 403, { error: "Path outside workspace" });
+			if (!existsSync(abs)) return jsonReply(res, 404, { error: "File not found" });
+			try {
+				const st = statSync(abs);
+				if (st.size > 10 * 1024 * 1024) return jsonReply(res, 413, { error: "File too large (>10MB)" });
+				const ext = reqPath.split(".").pop()?.toLowerCase() || "";
+				const mimeMap: Record<string, string> = {
+					png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif",
+					webp: "image/webp", svg: "image/svg+xml", ico: "image/x-icon", bmp: "image/bmp",
+				};
+				const mime = mimeMap[ext] || "application/octet-stream";
+				const data = readFileSync(abs);
+				res.writeHead(200, { "Content-Type": mime, "Content-Length": data.length, "Cache-Control": "no-cache" });
+				res.end(data);
 			} catch (err: any) {
 				jsonReply(res, 500, { error: err.message });
 			}
@@ -509,6 +766,17 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 	wss.on("connection", async (browserWs: WS) => {
 		console.log(dim("[voice] Browser connected"));
 
+		// ── Per-connection frame buffer + moment capture state ──────────
+		let latestVideoFrame: { frame: string; mimeType: string; ts: number } | null = null;
+		let lastFrameWriteTs = 0;
+		let latestScreenFrame: { frame: string; mimeType: string; ts: number } | null = null;
+		let lastScreenWriteTs = 0;
+		let lastMomentCaptureTs = 0;
+		const FRAME_WRITE_INTERVAL = 2000; // Write temp frame to disk every 2s
+		const MOMENT_COOLDOWN = 60000;     // 60s between auto-captures
+		const moodCounts: MoodCounts = { happy: 0, frustrated: 0, curious: 0, excited: 0, calm: 0 };
+		let sessionMessageCount = 0;
+
 		// Inject shared context (memory + conversation summary) into voice LLM instructions
 		const voiceContext = await getVoiceContext(opts.agentDir, activeBranch);
 		let instructions = opts.adapterConfig.instructions || "";
@@ -538,9 +806,32 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 		const sendToBrowser = (msg: ServerMessage) => {
 			safeSend(browserWs, JSON.stringify(msg));
 			appendMessage(opts.agentDir, activeBranch, msg);
+			// Track mood from user transcripts
+			if (msg.type === "transcript" && msg.role === "user" && !msg.partial) {
+				sessionMessageCount++;
+				const mood = detectMood(msg.text);
+				if (mood) moodCounts[mood]++;
+			}
 			// Detect personal info in voice transcripts and save to memory
 			if (msg.type === "transcript" && msg.role === "user" && !msg.partial && isMemoryWorthy(msg.text)) {
-				saveMemoryInBackground(msg.text, opts.agentDir, opts.model, opts.env);
+				saveMemoryInBackground(msg.text, opts.agentDir, opts.model, opts.env, () => {
+					safeSend(browserWs, JSON.stringify({ type: "files_changed" }));
+				});
+			}
+			// Auto-capture photo on memorable moments (with 60s cooldown)
+			if (msg.type === "transcript" && msg.role === "user" && !msg.partial && isMomentWorthy(msg.text)) {
+				const now = Date.now();
+				if (now - lastMomentCaptureTs >= MOMENT_COOLDOWN) {
+					lastMomentCaptureTs = now;
+					// Use buffered frame if available and fresh (<5s)
+					let frameBuffer: Buffer | undefined;
+					if (latestVideoFrame && (now - latestVideoFrame.ts) < 5000) {
+						frameBuffer = Buffer.from(latestVideoFrame.frame, "base64");
+					}
+					capturePhoto(agentRoot, msg.text.slice(0, 60), frameBuffer).catch((err) => {
+						console.error(dim(`[voice] Auto photo capture failed: ${err.message}`));
+					});
+				}
 			}
 		};
 
@@ -561,11 +852,38 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 		browserWs.on("message", (data) => {
 			try {
 				const msg = JSON.parse(data.toString()) as ClientMessage;
+
+				// Buffer video frames and throttle-write to disk for capture_photo tool
+				if (msg.type === "video_frame") {
+					const source = msg.source || "camera";
+					if (source === "screen") {
+						latestScreenFrame = { frame: msg.frame, mimeType: msg.mimeType, ts: Date.now() };
+						const now = Date.now();
+						if (now - lastScreenWriteTs >= 3000) {
+							lastScreenWriteTs = now;
+							const frameBuffer = Buffer.from(msg.frame, "base64");
+							const framePath = join(agentRoot, LATEST_SCREEN_FILE);
+							writeFile(framePath, frameBuffer).catch(() => {});
+						}
+					} else {
+						latestVideoFrame = { frame: msg.frame, mimeType: msg.mimeType, ts: Date.now() };
+						const now = Date.now();
+						if (now - lastFrameWriteTs >= FRAME_WRITE_INTERVAL) {
+							lastFrameWriteTs = now;
+							const frameBuffer = Buffer.from(msg.frame, "base64");
+							const framePath = join(agentRoot, LATEST_FRAME_FILE);
+							writeFile(framePath, frameBuffer).catch(() => {});
+						}
+					}
+				}
+
 				if (msg.type === "text") {
 					appendMessage(opts.agentDir, activeBranch, { type: "transcript", role: "user", text: msg.text });
 					// Detect personal info and save to memory in background
 					if (isMemoryWorthy(msg.text)) {
-						saveMemoryInBackground(msg.text, opts.agentDir, opts.model, opts.env);
+						saveMemoryInBackground(msg.text, opts.agentDir, opts.model, opts.env, () => {
+							safeSend(browserWs, JSON.stringify({ type: "files_changed" }));
+						});
 					}
 				} else if (msg.type === "file") {
 					// Save uploaded file to disk so the text agent can use it
@@ -595,10 +913,19 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 		browserWs.on("close", () => {
 			console.log(dim("[voice] Browser disconnected"));
 			adapter.disconnect().catch(() => {});
-			// Summarize chat history in background for future sessions
-			summarizeHistory(opts.agentDir, activeBranch).catch((err) => {
-				console.error(dim(`[voice] Background summarization failed: ${err.message}`));
-			});
+			// Summarize chat history, save mood, and write journal — track promises for graceful shutdown
+			const p = Promise.allSettled([
+				summarizeHistory(opts.agentDir, activeBranch).catch((err) => {
+					console.error(dim(`[voice] Background summarization failed: ${err.message}`));
+				}),
+				saveMoodEntry(opts.agentDir, moodCounts, sessionMessageCount).catch((err) => {
+					console.error(dim(`[voice] Mood save failed: ${err.message}`));
+				}),
+				writeJournalEntry(opts.agentDir, activeBranch, moodCounts, opts.model, opts.env).catch((err) => {
+					console.error(dim(`[voice] Journal write failed: ${err.message}`));
+				}),
+			]);
+			pendingShutdownWork.push(p);
 		});
 	});
 
@@ -611,9 +938,15 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 	console.log(dim(`[voice] Open http://localhost:${port} in your browser`));
 
 	return async () => {
-		// Force-close all open WebSocket connections so the HTTP server can shut down
+		// Gracefully close WebSocket connections to trigger close handlers (journal, mood, etc.)
 		for (const client of wss.clients) {
-			client.terminate();
+			client.close(1000, "Server shutting down");
+		}
+		// Wait for close handlers to fire, then await their async work (journal writes, etc.)
+		await new Promise((r) => setTimeout(r, 200));
+		if (pendingShutdownWork.length > 0) {
+			console.log(dim("[voice] Waiting for journal & mood saves..."));
+			await Promise.allSettled(pendingShutdownWork);
 		}
 		wss.close();
 		await new Promise<void>((resolve) => {

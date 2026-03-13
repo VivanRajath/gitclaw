@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>GitClaw Multimodal</title>
+<title>{{AGENT_NAME}}</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap');
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -40,7 +40,34 @@
   .chat-sidebar {
     width: 220px; min-width: 220px; background: #0a0d12; border-right: 1px solid #21262d;
     display: flex; flex-direction: column; overflow: hidden;
+    transition: width 0.25s cubic-bezier(0.4,0,0.2,1), min-width 0.25s cubic-bezier(0.4,0,0.2,1), opacity 0.2s ease;
   }
+  .chat-sidebar.collapsed {
+    width: 0; min-width: 0; opacity: 0; pointer-events: none; border-right: none;
+  }
+  .chat-sidebar-collapse {
+    background: none; border: none; color: #484f58; cursor: pointer; padding: 2px;
+    display: flex; align-items: center; transition: color 0.15s;
+  }
+  .chat-sidebar-collapse:hover { color: #b1bac4; }
+  .chat-sidebar-collapse svg { width: 16px; height: 16px; }
+  .chat-sidebar-edge-tab {
+    position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+    width: 16px; height: 48px; background: #161b22; border: 1px solid #21262d;
+    border-left: none; border-radius: 0 6px 6px 0; cursor: pointer;
+    display: none; align-items: center; justify-content: center; color: #484f58;
+    z-index: 10; transition: color 0.15s, background 0.15s;
+  }
+  .chat-sidebar-edge-tab:hover { color: #b1bac4; background: #1c2129; }
+  .chat-sidebar-edge-tab svg { width: 12px; height: 12px; }
+  .chat-sidebar-edge-tab.visible { display: flex; }
+  .chat-sidebar-toggle {
+    background: none; border: 1px solid #21262d; border-radius: 4px; color: #8b949e;
+    cursor: pointer; font-size: 11px; font-family: 'IBM Plex Mono', monospace;
+    padding: 3px 8px; display: flex; align-items: center; gap: 5px; transition: all 0.15s;
+  }
+  .chat-sidebar-toggle:hover { border-color: #30363d; color: #b1bac4; }
+  .chat-sidebar-toggle svg { width: 14px; height: 14px; }
   .chat-sidebar-header {
     padding: 10px 12px; display: flex; align-items: center; justify-content: space-between;
     border-bottom: 1px solid #21262d;
@@ -169,6 +196,226 @@
   }
   .drop-overlay.active { display: flex; }
 
+  /* Audit mode toggle in header */
+  .audit-toggle {
+    display: flex; align-items: center; gap: 6px; cursor: pointer;
+    font-size: 11px; color: #8b949e; font-family: 'IBM Plex Mono', monospace;
+    padding: 3px 10px; border-radius: 4px; border: 1px solid #21262d;
+    background: transparent; transition: all 0.2s ease; user-select: none;
+  }
+  .audit-toggle:hover { border-color: #30363d; color: #b1bac4; }
+  .audit-toggle.active { border-color: #3fb950; color: #3fb950; background: rgba(63,185,80,0.08); }
+  .audit-toggle .audit-dot {
+    width: 6px; height: 6px; border-radius: 50%; background: #484f58;
+    transition: background 0.2s, box-shadow 0.2s;
+  }
+  .audit-toggle.active .audit-dot {
+    background: #3fb950;
+    box-shadow: 0 0 6px rgba(63,185,80,0.6);
+  }
+  @keyframes audit-dot-pulse {
+    0%,100% { box-shadow: 0 0 6px rgba(63,185,80,0.6); }
+    50% { box-shadow: 0 0 12px rgba(63,185,80,0.9); }
+  }
+  .audit-toggle.active.recording .audit-dot {
+    animation: audit-dot-pulse 1.5s ease-in-out infinite;
+  }
+
+  /* Files panel (right side of chat) — contains tree + inline diff viewer */
+  .files-panel {
+    width: 40vw; min-width: 200px; background: #0e1117; border-left: 1px solid #21262d;
+    display: flex; flex-direction: column; overflow: hidden; position: relative;
+    transition: opacity 0.25s ease;
+  }
+  .files-panel.collapsed { min-width: 0; }
+  .files-panel.collapsed {
+    width: 0 !important; min-width: 0 !important; opacity: 0; pointer-events: none; border-left: none;
+  }
+  /* Resize handles */
+  .resize-handle-x {
+    position: absolute; left: -3px; top: 0; bottom: 0; width: 6px;
+    cursor: col-resize; z-index: 20;
+  }
+  .resize-handle-x:hover, .resize-handle-x.active { background: rgba(88,166,255,0.3); }
+  .resize-handle-y {
+    height: 6px; cursor: row-resize; flex-shrink: 0; position: relative;
+  }
+  .resize-handle-y:hover, .resize-handle-y.active { background: rgba(88,166,255,0.3); }
+  .resize-handle-y::after {
+    content: ''; position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+    width: 24px; height: 2px; background: #30363d; border-radius: 1px;
+  }
+  .files-panel-header {
+    padding: 10px 16px; font-size: 11px; color: #8b949e; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.5px;
+    display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #21262d;
+    flex-shrink: 0;
+  }
+  .files-panel-header .fp-title { display: flex; align-items: center; gap: 8px; }
+  .files-panel-header .fp-count {
+    font-size: 9px; background: rgba(63,185,80,0.15); color: #3fb950;
+    padding: 1px 6px; border-radius: 8px; font-weight: 500; min-width: 18px; text-align: center;
+    transition: opacity 0.3s, transform 0.3s;
+  }
+  .files-panel-header .fp-count.hidden { opacity: 0; transform: scale(0.5); pointer-events: none; }
+  .files-panel-header button {
+    background: none; border: none; color: #8b949e; cursor: pointer;
+    font-size: 14px; padding: 2px 6px; border-radius: 3px; font-family: inherit;
+  }
+  .files-panel-header button:hover { color: #58a6ff; background: rgba(88,166,255,0.08); }
+
+  /* File tree area */
+  .files-panel .file-tree { flex: 1; overflow-y: auto; padding: 4px 0; min-height: 80px; }
+
+  /* File tree change animations */
+  @keyframes file-pulse {
+    0%   { background: transparent; box-shadow: none; }
+    15%  { background: rgba(63,185,80,0.18); box-shadow: inset 0 0 12px rgba(63,185,80,0.15), 0 0 8px rgba(63,185,80,0.1); }
+    100% { background: transparent; box-shadow: none; }
+  }
+  @keyframes file-slide-in {
+    0% { opacity: 0; transform: translateX(12px); }
+    100% { opacity: 1; transform: translateX(0); }
+  }
+  .ft-item.changed, summary.changed { animation: file-pulse 2s ease-out; }
+  .ft-item.new-file, summary.new-file { animation: file-slide-in 0.3s ease-out, file-pulse 2s ease-out 0.3s; }
+  .ft-item { position: relative; }
+  .ft-badge {
+    margin-left: auto; font-size: 9px; font-weight: 600; padding: 1px 5px;
+    border-radius: 3px; letter-spacing: 0.3px; flex-shrink: 0;
+  }
+  .ft-badge.pop { animation: badge-pop 0.35s cubic-bezier(0.34,1.56,0.64,1); }
+  @keyframes badge-pop { 0% { opacity: 0; transform: scale(0.3); } 100% { opacity: 1; transform: scale(1); } }
+  .ft-badge.edited { background: rgba(63,185,80,0.15); color: #3fb950; }
+  .ft-badge.edited.pop { box-shadow: 0 0 8px rgba(63,185,80,0.4); }
+  .ft-badge.new { background: rgba(88,166,255,0.15); color: #58a6ff; }
+  .ft-badge.new.pop { box-shadow: 0 0 8px rgba(88,166,255,0.4); }
+  .ft-item .ft-gutter {
+    position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+    border-radius: 0 2px 2px 0;
+  }
+  .ft-gutter.edited { background: #3fb950; }
+  .ft-gutter.new { background: #58a6ff; }
+
+  /* Inline diff viewer (inside files-panel, below tree) */
+  .diff-viewer {
+    background: #0a0d12;
+    display: flex; flex-direction: column; overflow: hidden;
+    height: 0; opacity: 0; flex-shrink: 0;
+    transition: height 0.35s cubic-bezier(0.4,0,0.2,1), opacity 0.25s ease;
+  }
+  .diff-viewer.open {
+    height: 280px; opacity: 1;
+  }
+  .diff-viewer-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 12px; border-bottom: 1px solid #161b22; flex-shrink: 0;
+  }
+  .diff-viewer-header .dv-left { display: flex; align-items: center; gap: 8px; overflow: hidden; }
+  .diff-viewer-header .dv-path {
+    font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #b1bac4;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .diff-viewer-header .dv-status {
+    font-size: 8px; font-weight: 700; padding: 2px 6px; border-radius: 3px;
+    flex-shrink: 0; text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .dv-status.edited { background: rgba(63,185,80,0.15); color: #3fb950; }
+  .dv-status.viewing { background: rgba(88,166,255,0.1); color: #58a6ff; }
+  .diff-viewer-header button {
+    background: none; border: none; color: #484f58; cursor: pointer;
+    font-size: 14px; padding: 2px 6px; border-radius: 3px;
+  }
+  .diff-viewer-header button:hover { color: #e6edf3; background: #161b22; }
+  /* Auto-close countdown bar */
+  .dv-countdown {
+    height: 2px; background: #3fb950; transition: width 2s linear;
+    flex-shrink: 0;
+  }
+  .dv-countdown.done { width: 0 !important; }
+  .diff-viewer-content {
+    flex: 1; overflow: auto; padding: 0; margin: 0; position: relative;
+  }
+  .dv-md-toggle { display: flex; align-items: center; }
+  .dv-md-toggle.active { color: #58a6ff !important; }
+  .dv-markdown {
+    padding: 16px 20px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    font-size: 13px; line-height: 1.6; color: #e6edf3;
+  }
+  .dv-markdown.hidden, .dv-image.hidden { display: none; }
+  .dv-image {
+    display: flex; align-items: center; justify-content: center; padding: 20px;
+    flex: 1; background: #0a0d12; overflow: auto;
+  }
+  .dv-image img {
+    max-width: 100%; max-height: 100%; object-fit: contain;
+    border-radius: 6px; border: 1px solid #21262d;
+    background: repeating-conic-gradient(#1c2129 0% 25%, #161b22 0% 50%) 0 0 / 16px 16px;
+  }
+  .dv-image .img-meta {
+    position: absolute; bottom: 8px; right: 12px; font-size: 10px; color: #484f58;
+    font-family: 'IBM Plex Mono', monospace;
+  }
+  .dv-markdown h1 { font-size: 1.6em; font-weight: 600; border-bottom: 1px solid #21262d; padding-bottom: 6px; margin: 16px 0 8px; color: #f0f6fc; }
+  .dv-markdown h2 { font-size: 1.3em; font-weight: 600; border-bottom: 1px solid #21262d; padding-bottom: 4px; margin: 14px 0 6px; color: #f0f6fc; }
+  .dv-markdown h3 { font-size: 1.1em; font-weight: 600; margin: 12px 0 4px; color: #f0f6fc; }
+  .dv-markdown h4, .dv-markdown h5, .dv-markdown h6 { font-size: 1em; font-weight: 600; margin: 10px 0 4px; color: #e6edf3; }
+  .dv-markdown p { margin: 0 0 10px; }
+  .dv-markdown ul, .dv-markdown ol { padding-left: 24px; margin: 0 0 10px; }
+  .dv-markdown li { margin: 2px 0; }
+  .dv-markdown code {
+    background: rgba(110,118,129,0.15); padding: 2px 5px; border-radius: 3px;
+    font-family: 'JetBrains Mono', 'IBM Plex Mono', monospace; font-size: 0.9em;
+  }
+  .dv-markdown pre {
+    background: #161b22; border: 1px solid #21262d; border-radius: 6px;
+    padding: 12px 16px; overflow-x: auto; margin: 0 0 12px;
+  }
+  .dv-markdown pre code { background: none; padding: 0; font-size: 12px; }
+  .dv-markdown blockquote {
+    border-left: 3px solid #30363d; padding: 4px 16px; margin: 0 0 10px; color: #8b949e;
+  }
+  .dv-markdown a { color: #58a6ff; text-decoration: none; }
+  .dv-markdown a:hover { text-decoration: underline; }
+  .dv-markdown hr { border: none; border-top: 1px solid #21262d; margin: 16px 0; }
+  .dv-markdown strong { color: #f0f6fc; }
+  .dv-markdown table { border-collapse: collapse; margin: 0 0 12px; width: 100%; }
+  .dv-markdown th, .dv-markdown td { border: 1px solid #21262d; padding: 6px 12px; text-align: left; }
+  .dv-markdown th { background: #161b22; font-weight: 600; }
+  .dv-markdown img { max-width: 100%; border-radius: 6px; }
+  .diff-viewer-content pre {
+    margin: 0; padding: 8px 0; font-family: 'JetBrains Mono', 'IBM Plex Mono', monospace;
+    font-size: 11px; line-height: 1.55; color: #e6edf3; white-space: pre;
+    counter-reset: line;
+  }
+  .diff-viewer-content .dv-line {
+    display: block; padding: 0 10px 0 52px; position: relative; min-height: 1.55em;
+  }
+  .diff-viewer-content .dv-line::before {
+    content: counter(line); counter-increment: line;
+    position: absolute; left: 0; width: 36px; text-align: right; padding-right: 8px;
+    color: #484f58; font-size: 10px; user-select: none;
+  }
+  .diff-viewer-content .dv-line:hover { background: rgba(88,166,255,0.04); }
+  .diff-viewer-content .dv-line .dv-gutter {
+    position: absolute; left: 40px; top: 2px; bottom: 2px; width: 3px;
+    border-radius: 2px;
+  }
+  .dv-gutter.g-added { background: #3fb950; box-shadow: 0 0 6px rgba(63,185,80,0.5); }
+  .dv-gutter.g-modified { background: #d29922; box-shadow: 0 0 6px rgba(210,153,34,0.5); }
+  @keyframes dv-line-flash {
+    0%   { background: rgba(63,185,80,0.3); box-shadow: inset 0 0 20px rgba(63,185,80,0.15); }
+    40%  { background: rgba(63,185,80,0.12); box-shadow: inset 0 0 8px rgba(63,185,80,0.06); }
+    100% { background: transparent; box-shadow: none; }
+  }
+  .dv-line.line-changed { animation: dv-line-flash 2s ease-out forwards; border-left: 2px solid rgba(210,153,34,0.4); padding-left: 50px; }
+  .dv-line.line-added   { animation: dv-line-flash 2s ease-out forwards; border-left: 2px solid rgba(63,185,80,0.4); padding-left: 50px; }
+  @keyframes dv-line-enter {
+    0% { opacity: 0; transform: translateX(6px); }
+    100% { opacity: 1; transform: translateX(0); }
+  }
+  .dv-line.line-enter { animation: dv-line-enter 0.15s ease-out forwards; }
+
   /* FILES VIEW (disabled)
   .files-view { display: flex; flex: 1; overflow: hidden; }
   .files-view.hidden { display: none; }
@@ -203,16 +450,29 @@
   }
   .file-sidebar-header button:hover { color: #58a6ff; background: rgba(88,166,255,0.08); }
   .file-tree { flex: 1; overflow-y: auto; padding: 4px 0; }
+  /* File tree — native <details>/<summary> based */
+  .ft-dir { border: none; margin: 0; padding: 0; }
+  .ft-dir > summary {
+    display: flex; align-items: center; gap: 4px; padding: 3px 8px; font-size: 13px;
+    cursor: pointer; color: #b1bac4; white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; font-family: 'IBM Plex Mono', monospace;
+    list-style: none; transition: background 0.1s; user-select: none;
+  }
+  .ft-dir > summary::-webkit-details-marker { display: none; }
+  .ft-dir > summary::marker { display: none; content: ''; }
+  .ft-dir > summary:hover { background: #161b22; }
+  .ft-dir > .ft-children { margin: 0; padding: 0; }
   .ft-item {
     display: flex; align-items: center; gap: 4px; padding: 3px 8px; font-size: 13px;
     cursor: pointer; color: #b1bac4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     transition: background 0.1s; font-family: 'IBM Plex Mono', monospace;
   }
   .ft-item:hover { background: #161b22; }
-  .ft-item.active { background: rgba(88,166,255,0.12); color: #e6edf3; }
-  .ft-item .ft-icon { width: 16px; height: 16px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
-  .ft-item .ft-chevron { width: 14px; height: 14px; flex-shrink: 0; color: #8b949e; display: flex; align-items: center; justify-content: center; }
-  .ft-item .ft-name { overflow: hidden; text-overflow: ellipsis; margin-left: 2px; }
+  .ft-item.active-viewer { background: rgba(88,166,255,0.08); color: #e6edf3; }
+  .ft-icon { width: 16px; height: 16px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+  .ft-chevron { width: 14px; height: 14px; flex-shrink: 0; color: #484f58; display: flex; align-items: center; justify-content: center; transition: transform 0.15s; }
+  .ft-dir[open] > summary .ft-chevron { transform: rotate(90deg); }
+  .ft-name { overflow: hidden; text-overflow: ellipsis; margin-left: 2px; }
   .ft-icon.folder { color: #d29922; }
   .ft-icon.ts { color: #58a6ff; }
   .ft-icon.js { color: #f0db4f; }
@@ -224,7 +484,6 @@
   .ft-icon.py { color: #3572A5; }
   .ft-icon.sh { color: #89e051; }
   .ft-icon.default { color: #6e7681; }
-  .ft-group.collapsed > .ft-children { display: none; }
   .editor-area { flex: 1; display: flex; flex-direction: column; min-width: 0; background: #0d1117; }
   .editor-tabs {
     display: flex; background: #0a0d12; border-bottom: 1px solid #21262d; overflow-x: auto; min-height: 35px;
@@ -266,10 +525,13 @@
   }
   .status-bar .sb-right { margin-left: auto; display: flex; gap: 16px; }
   FILES VIEW (disabled) */
-  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  /* Scrollbar — dark theme */
+  * { scrollbar-width: thin; scrollbar-color: rgba(139,148,158,0.25) transparent; }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: rgba(139,148,158,0.2); border-radius: 4px; }
-  ::-webkit-scrollbar-thumb:hover { background: rgba(139,148,158,0.4); }
+  ::-webkit-scrollbar-thumb { background: rgba(139,148,158,0.2); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(139,148,158,0.35); }
+  ::-webkit-scrollbar-corner { background: transparent; }
   /* INTEGRATIONS VIEW */
   .integrations-view { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
   .integrations-view.hidden { display: none; }
@@ -329,13 +591,17 @@
     .camera-container { aspect-ratio: 16/9; }
     .activity-bar { display: none; }
     .file-sidebar { width: 100%; min-width: 0; max-height: 40vh; border-right: none; border-bottom: 1px solid #21262d; }
+    .files-panel { position: absolute; right: 0; top: 0; bottom: 0; z-index: 50; width: 280px; min-width: 280px; }
   }
 </style>
 </head>
 <body>
 <div class="header">
   <div class="header-left">
-    <h1>Git<span>Claw</span></h1>
+    <h1>{{AGENT_NAME}}</h1>
+    <button class="chat-sidebar-toggle" id="chatSidebarToggle" onclick="toggleChatSidebar()" title="Toggle chat list">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
+    </button>
     <div class="view-tabs">
       <button class="view-tab active" id="tabChat" onclick="switchView('chat')">Chat</button>
       <!-- <button class="view-tab" id="tabFiles" onclick="switchView('files')">Files</button> -->
@@ -343,13 +609,23 @@
     </div>
   </div>
   <div class="header-right">
+    <button class="audit-toggle" id="auditToggle" onclick="toggleAuditMode()" title="File System: watch agent file changes live">
+      <span class="audit-dot"></span>
+      <span>File System</span>
+    </button>
     <span class="status-dot" id="statusDot"></span>
     <span class="status-text" id="statusText">Disconnected</span>
   </div>
 </div>
-<div class="main">
-  <div class="chat-sidebar" id="chatSidebar">
+<div class="main" style="position:relative;">
+  <button class="chat-sidebar-edge-tab visible" id="chatEdgeTab" onclick="toggleChatSidebar()" title="Show chats">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+  </button>
+  <div class="chat-sidebar collapsed" id="chatSidebar">
     <div class="chat-sidebar-header">
+      <button class="chat-sidebar-collapse" onclick="toggleChatSidebar()" title="Collapse chats">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
       <span>Chats</span>
       <button class="new-chat-btn" onclick="newChat()">+ New</button>
     </div>
@@ -371,6 +647,10 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.934a.5.5 0 0 0-.777-.416L16 11"/><rect x="2" y="6" width="14" height="12" rx="2"/></svg>
           Camera
         </button>
+        <button class="ctrl-btn" id="screenBtn" onclick="toggleScreen()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>
+          Screen
+        </button>
         <button class="ctrl-btn" id="micBtn" onclick="toggleMic()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
           Mic
@@ -389,6 +669,33 @@
         <button onclick="sendText()">Send</button>
       </div>
       <div class="drop-overlay" id="dropOverlay">Drop files here</div>
+    </div>
+    <div class="files-panel collapsed" id="filesPanel">
+      <div class="resize-handle-x" id="fpResizeX"></div>
+      <div class="files-panel-header">
+        <span class="fp-title">Files <span class="fp-count hidden" id="fpCount">0</span></span>
+        <button onclick="toggleAuditMode()">&times;</button>
+      </div>
+      <div class="file-tree" id="explorerTree"></div>
+      <div class="resize-handle-y" id="dvResizeY"></div>
+      <div class="diff-viewer" id="diffViewer">
+        <div class="diff-viewer-header">
+          <div class="dv-left">
+            <span class="dv-path" id="dvPath"></span>
+            <span class="dv-status viewing" id="dvStatus">VIEWING</span>
+          </div>
+          <button class="dv-md-toggle hidden" id="dvMdToggle" onclick="toggleMdView()" title="Toggle markdown preview">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h20v18H2z"/><path d="M7 15V9l2.5 3L12 9v6"/><path d="M17 9v6l-2-3"/></svg>
+          </button>
+          <button onclick="closeDiffViewer()" title="Close">&times;</button>
+        </div>
+        <div class="dv-countdown" id="dvCountdown" style="width:100%"></div>
+        <div class="diff-viewer-content">
+          <pre id="dvPre"></pre>
+          <div class="dv-markdown hidden" id="dvMarkdown"></div>
+          <div class="dv-image hidden" id="dvImage"></div>
+        </div>
+      </div>
     </div>
   </div>
   <!-- FILES VIEW (disabled)
@@ -431,6 +738,7 @@
     </div>
   </div>
 </div>
+<script src="https://cdn.jsdelivr.net/npm/marked@15.0.7/marked.min.js"></script>
 <!-- <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script> -->
 <script>
 let currentView='chat',filesLoaded=false,integrationsLoaded=false;
@@ -470,17 +778,18 @@ document.addEventListener('keydown',function(e){if(currentView!=='files')return;
 FILES/MONACO DISABLED */
 
 // CHAT / VOICE
-var ws=null,audioCtx=null,micStream=null,micProcessor=null,micActive=false,cameraStream=null,cameraActive=false,cameraInterval=null;
-var statusDot=document.getElementById('statusDot'),statusText=document.getElementById('statusText'),micBtn=document.getElementById('micBtn'),cameraBtn=document.getElementById('cameraBtn'),cameraVideo=document.getElementById('cameraVideo'),cameraOff=document.getElementById('cameraOff'),cameraCanvas=document.getElementById('cameraCanvas'),conv=document.getElementById('conversation'),textInput=document.getElementById('textInput');
+var ws=null,audioCtx=null,micStream=null,micProcessor=null,micActive=false,cameraStream=null,cameraActive=false,cameraInterval=null,screenStream=null,screenActive=false,screenInterval=null;
+var statusDot=document.getElementById('statusDot'),statusText=document.getElementById('statusText'),micBtn=document.getElementById('micBtn'),cameraBtn=document.getElementById('cameraBtn'),screenBtn=document.getElementById('screenBtn'),cameraVideo=document.getElementById('cameraVideo'),cameraOff=document.getElementById('cameraOff'),cameraCanvas=document.getElementById('cameraCanvas'),conv=document.getElementById('conversation'),textInput=document.getElementById('textInput');
 
 function setStatus(t,s){statusText.textContent=t;statusDot.className='status-dot '+(s||'');}
 function appendConv(h,c){var d=document.createElement('div');d.className='conv-msg '+(c||'');d.innerHTML=h;conv.appendChild(d);conv.scrollTop=conv.scrollHeight;}
-function connectWS(){if(ws)return;setStatus('Connecting...','');ws=new WebSocket('ws://'+window.location.host);ws.onopen=function(){setStatus('Connected','connected');};ws.onmessage=function(e){try{handleServerMessage(JSON.parse(e.data));}catch(x){}};ws.onerror=function(){setStatus('Connection error','error');};ws.onclose=function(){ws=null;setStatus('Disconnected','');stopMic();stopCamera();};}
+function connectWS(){if(ws)return;setStatus('Connecting...','');ws=new WebSocket('ws://'+window.location.host);ws.onopen=function(){setStatus('Connected','connected');};ws.onmessage=function(e){try{handleServerMessage(JSON.parse(e.data));}catch(x){}};ws.onerror=function(){setStatus('Connection error','error');};ws.onclose=function(){ws=null;setStatus('Disconnected','');stopMic();stopCamera();stopScreen();};}
 function sendMsg(m){if(ws&&ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify(m));}
 
 var assistantText='',thinkingEl=null;
 function handleServerMessage(m){switch(m.type){
   case'audio_delta':playAudioDelta(m.audio);break;
+  case'interrupt':flushAudio();break;
   case'transcript':
     if(m.role==='user'&&!m.partial)appendConv('<span class="label">You: </span>'+escHtml(m.text),'user');
     else if(m.role==='assistant'){if(m.partial)assistantText+=m.text;else{if(assistantText){appendConv('<span class="label">Assistant: </span>'+escHtml(assistantText),'assistant');assistantText='';}else appendConv('<span class="label">Assistant: </span>'+escHtml(m.text),'assistant');}}
@@ -491,29 +800,43 @@ function handleServerMessage(m){switch(m.type){
   case'agent_done':
     thinkingEl=null;
     setStatus('Connected','connected');
-    if(filesLoaded)loadFileTree();break;
+    if(filesLoaded)loadFileTree();
+    refreshFileTree();break;
   case'tool_call':
     thinkingEl=null;
     var argsStr=JSON.stringify(m.args,null,2);
     var argsPreview=argsStr.length>200?argsStr.slice(0,200)+'...':argsStr;
     appendConv('<span class="label">Tool: </span>'+escHtml(m.toolName)+'<div class="tool-args">'+escHtml(argsPreview)+'</div>','tool-call');
+    // In audit mode, track which file the agent is about to write
+    if(auditMode){
+      var writePath=detectFileWritePath(m.toolName,m.args);
+      if(writePath)lastToolWritePath=writePath;
+    }
     break;
   case'tool_result':
     var cls='tool-result'+(m.isError?' error':'');
     var lbl=m.isError?'Error: ':'Result: ';
     var preview=m.content.length>300?m.content.slice(0,300)+'...':m.content;
     appendConv('<span class="label">'+escHtml(m.toolName)+' '+lbl+'</span><div class="tool-content">'+escHtml(preview)+'</div>',cls);
-    break;
+    // In audit mode, auto-open the file that was just written
+    if(auditMode&&lastToolWritePath&&!m.isError){
+      var autoPath=lastToolWritePath;
+      lastToolWritePath=null;
+      auditAutoOpenFile(autoPath);
+    }
+    refreshFileTree();break;
   case'agent_thinking':
     if(!thinkingEl){thinkingEl=document.createElement('div');thinkingEl.className='conv-msg thinking';thinkingEl.innerHTML='<span class="label">Thinking: </span><span class="thinking-text"></span>';conv.appendChild(thinkingEl);}
     thinkingEl.querySelector('.thinking-text').textContent+=m.text;
     conv.scrollTop=conv.scrollHeight;
     break;
+  case'files_changed':refreshFileTree();break;
   case'error':appendConv('Error: '+escHtml(m.message),'system');break;
 }}
 function escHtml(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;}
 
 var audioQueue=[],isPlaying=false,currentSource=null,nextPlayTime=0;
+function flushAudio(){if(currentSource){try{currentSource.stop();}catch(e){}}currentSource=null;audioQueue=[];nextPlayTime=0;isPlaying=false;}
 function playAudioDelta(b){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)({sampleRate:24000});var bin=atob(b),bytes=new Uint8Array(bin.length);for(var i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);var i16=new Int16Array(bytes.buffer),f32=new Float32Array(i16.length);for(var i=0;i<i16.length;i++)f32[i]=i16[i]/32768;var buf=audioCtx.createBuffer(1,f32.length,24000);buf.getChannelData(0).set(f32);audioQueue.push(buf);if(!isPlaying)playNext();}
 function playNext(){if(audioQueue.length===0){isPlaying=false;return;}isPlaying=true;var buf=audioQueue.shift(),src=audioCtx.createBufferSource();src.buffer=buf;src.connect(audioCtx.destination);var now=audioCtx.currentTime,st=Math.max(now,nextPlayTime);src.start(st);nextPlayTime=st+buf.duration;src.onended=function(){if(audioQueue.length>0)playNext();else isPlaying=false;};currentSource=src;}
 
@@ -524,6 +847,10 @@ function stopMic(){micActive=false;micBtn.classList.remove('active');if(micProce
 async function toggleCamera(){if(cameraActive)stopCamera();else await startCamera();}
 async function startCamera(){connectWS();try{cameraStream=await navigator.mediaDevices.getUserMedia({video:{width:640,height:480}});}catch(e){appendConv('Camera access denied','system');return;}cameraVideo.srcObject=cameraStream;cameraVideo.style.display='block';cameraOff.style.display='none';cameraCanvas.width=640;cameraCanvas.height=480;var ctx=cameraCanvas.getContext('2d');cameraInterval=setInterval(function(){if(!cameraActive||!ws||ws.readyState!==WebSocket.OPEN)return;ctx.drawImage(cameraVideo,0,0,640,480);var u=cameraCanvas.toDataURL('image/jpeg',0.7);sendMsg({type:'video_frame',frame:u.split(',')[1],mimeType:'image/jpeg'});},1000);cameraActive=true;cameraBtn.classList.add('active');}
 function stopCamera(){cameraActive=false;cameraBtn.classList.remove('active');if(cameraInterval){clearInterval(cameraInterval);cameraInterval=null;}if(cameraStream){cameraStream.getTracks().forEach(function(t){t.stop();});cameraStream=null;}cameraVideo.style.display='none';cameraOff.style.display='';}
+
+async function toggleScreen(){if(screenActive)stopScreen();else await startScreen();}
+async function startScreen(){connectWS();try{screenStream=await navigator.mediaDevices.getDisplayMedia({video:{cursor:'always'}});}catch(e){appendConv('Screen sharing cancelled','system');return;}var video=document.createElement('video');video.srcObject=screenStream;video.muted=true;video.playsInline=true;video.play();var canvas=document.createElement('canvas');var ctx=canvas.getContext('2d');screenStream.getVideoTracks()[0].onended=function(){stopScreen();};screenInterval=setInterval(function(){if(!screenActive||!ws||ws.readyState!==WebSocket.OPEN)return;var vw=video.videoWidth||1920,vh=video.videoHeight||1080;var scale=Math.min(960/vw,540/vh,1);canvas.width=Math.round(vw*scale);canvas.height=Math.round(vh*scale);ctx.drawImage(video,0,0,canvas.width,canvas.height);var u=canvas.toDataURL('image/jpeg',0.6);sendMsg({type:'video_frame',frame:u.split(',')[1],mimeType:'image/jpeg',source:'screen'});},2000);screenActive=true;screenBtn.classList.add('active');cameraVideo.srcObject=screenStream;cameraVideo.style.display='block';cameraOff.style.display='none';}
+function stopScreen(){screenActive=false;screenBtn.classList.remove('active');if(screenInterval){clearInterval(screenInterval);screenInterval=null;}if(screenStream){screenStream.getTracks().forEach(function(t){t.stop();});screenStream=null;}if(!cameraActive){cameraVideo.style.display='none';cameraOff.style.display='';cameraVideo.srcObject=cameraStream;}else{cameraVideo.srcObject=cameraStream;}}
 
 // FILE ATTACHMENTS
 var pendingFiles=[];
@@ -622,6 +949,66 @@ panelRight.addEventListener('drop',function(e){
   e.preventDefault();dragCounter=0;dropOverlay.classList.remove('active');
   if(e.dataTransfer.files.length>0)handleFileSelect(e.dataTransfer.files);
 });
+
+// CHAT SIDEBAR TOGGLE
+function toggleChatSidebar(){
+  var sb=document.getElementById('chatSidebar');
+  var tab=document.getElementById('chatEdgeTab');
+  var isCollapsed=sb.classList.toggle('collapsed');
+  tab.classList.toggle('visible',isCollapsed);
+}
+
+// RESIZE HANDLES
+(function(){
+  // Files panel horizontal resize
+  var fpHandle=document.getElementById('fpResizeX');
+  var fp=document.getElementById('filesPanel');
+  fpHandle.addEventListener('mousedown',function(e){
+    e.preventDefault();
+    fpHandle.classList.add('active');
+    var startX=e.clientX, startW=fp.offsetWidth;
+    function onMove(e){
+      var w=startW-(e.clientX-startX);
+      if(w<200)w=200;
+      if(w>window.innerWidth*0.6)w=window.innerWidth*0.6;
+      fp.style.width=w+'px';
+      fp.style.transition='none';
+    }
+    function onUp(){
+      fpHandle.classList.remove('active');
+      fp.style.transition='';
+      document.removeEventListener('mousemove',onMove);
+      document.removeEventListener('mouseup',onUp);
+    }
+    document.addEventListener('mousemove',onMove);
+    document.addEventListener('mouseup',onUp);
+  });
+
+  // Diff viewer vertical resize
+  var dvHandle=document.getElementById('dvResizeY');
+  var dv=document.getElementById('diffViewer');
+  dvHandle.addEventListener('mousedown',function(e){
+    e.preventDefault();
+    dvHandle.classList.add('active');
+    var startY=e.clientY, startH=dv.offsetHeight;
+    function onMove(e){
+      var h=startH-(e.clientY-startY);
+      if(h<80)h=80;
+      var maxH=fp.offsetHeight-120;
+      if(h>maxH)h=maxH;
+      dv.style.height=h+'px';
+      dv.style.transition='none';
+    }
+    function onUp(){
+      dvHandle.classList.remove('active');
+      dv.style.transition='';
+      document.removeEventListener('mousemove',onMove);
+      document.removeEventListener('mouseup',onUp);
+    }
+    document.addEventListener('mousemove',onMove);
+    document.addEventListener('mouseup',onUp);
+  });
+})();
 
 // CHAT BRANCHES
 var currentBranch='',chatBranches=[];
@@ -770,6 +1157,420 @@ window.addEventListener('message',function(e){
 });
 // Also refresh when window regains focus (in case popup completed)
 window.addEventListener('focus',function(){if(currentView==='integrations'&&integrationsLoaded)loadToolkits();});
+
+// ── AUDIT MODE & FILE EXPLORER ──────────────────────────────────────
+var ICONS={chevronRight:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9,18 15,12 9,6"/></svg>',chevronDown:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6,9 12,15 18,9"/></svg>',folder:'<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>',folderOpen:'<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M5 19h14a2 2 0 001.84-1.22L23 12H5.24a2 2 0 00-1.84 1.22L1 19h2a2 2 0 002-2V7a2 2 0 012-2h4l2 2h6a2 2 0 012 2v1"/></svg>',file:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/></svg>',fileCode:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/><path d="M10 12l-2 2 2 2"/><path d="M14 12l2 2-2 2"/></svg>'};
+
+function getFileIconClass(n){var e=n.split('.').pop().toLowerCase();if(['ts','tsx'].includes(e))return'ts';if(['js','jsx','mjs'].includes(e))return'js';if(e==='json')return'json';if(['css','scss','less'].includes(e))return'css';if(['html','htm'].includes(e))return'html';if(['md','txt','rst'].includes(e))return'md';if(['yaml','yml'].includes(e))return'yaml';if(e==='py')return'py';if(['sh','bash','zsh'].includes(e))return'sh';return'default';}
+function getFileIconSvg(n){var c=getFileIconClass(n);if(['ts','js','css','html','py','sh'].includes(c))return ICONS.fileCode;return ICONS.file;}
+
+var auditMode=false;
+var auditBaselineMtimes=null; // snapshot taken when audit mode turns on — never triggers EDITED
+var fileTreeMtimes={};
+var diffOpenPath=null;
+var diffOpenContent='';
+var refreshDebounceTimer=null;
+var lastToolWritePath=null;
+var auditEditedPaths=new Set(); // files confirmed edited since audit started
+var fileContentCache={}; // path -> content for diff
+var autoCloseTimer=null;
+
+function toggleAuditMode(){
+  auditMode=!auditMode;
+  var toggle=document.getElementById('auditToggle');
+  var panel=document.getElementById('filesPanel');
+  toggle.classList.toggle('active',auditMode);
+  panel.classList.toggle('collapsed',!auditMode);
+  if(auditMode){
+    toggle.classList.add('recording');
+    auditEditedPaths.clear();
+    auditBaselineMtimes=null; // will be set on first tree load
+    fileTreeMtimes={};
+    fileContentCache={};
+    closeDiffViewer();
+    loadExplorerTree();
+  }else{
+    toggle.classList.remove('recording');
+    closeDiffViewer();
+  }
+}
+
+// Detect file paths from tool_call args for auto-open
+function detectFileWritePath(toolName,args){
+  if(!args)return null;
+  var tn=toolName.toLowerCase();
+  var isWrite=tn==='write'||tn==='edit'||tn==='write_file'||tn==='edit_file'
+    ||tn==='create_file'||tn==='save_file'||tn==='writefile'||tn==='editfile'
+    ||tn.indexOf('write')!==-1||tn.indexOf('edit')!==-1;
+  if(!isWrite)return null;
+  var path=args.file_path||args.path||args.filepath||args.filename||args.file||null;
+  if(!path)return null;
+  if(typeof path==='string'&&path.startsWith('/')){
+    var parts=path.split('/');
+    for(var i=parts.length-1;i>=0;i--){
+      if(parts[i]==='memory'||parts[i]==='skills'||parts[i]==='src'||parts[i]==='workspace'){
+        return parts.slice(i).join('/');
+      }
+    }
+    return parts[parts.length-1];
+  }
+  return path;
+}
+
+// Called after a successful write tool — auto-open inline diff
+function auditAutoOpenFile(path){
+  auditEditedPaths.add(path);
+  setTimeout(function(){
+    loadExplorerTree();
+    openDiffViewer(path,true,2500);
+  },400);
+}
+
+function collectMtimes(entries,out){
+  for(var i=0;i<entries.length;i++){
+    var e=entries[i];
+    if(e.type==='file'&&e.mtime)out[e.path]=e.mtime;
+    if(e.children)collectMtimes(e.children,out);
+  }
+}
+
+// Compare mtimes, but only if we have a previous baseline
+function findChangedSinceLastRefresh(oldMtimes,newMtimes){
+  var changed=[];
+  // If oldMtimes is empty, this is baseline — nothing is "changed"
+  if(Object.keys(oldMtimes).length===0)return changed;
+  for(var p in newMtimes){
+    if(!oldMtimes[p]||newMtimes[p]>oldMtimes[p])changed.push(p);
+  }
+  return changed;
+}
+
+function updateChangeCount(){
+  var countEl=document.getElementById('fpCount');
+  var n=auditEditedPaths.size;
+  countEl.textContent=n;
+  countEl.classList.toggle('hidden',n===0);
+}
+
+async function loadExplorerTree(){
+  var t=document.getElementById('explorerTree');
+  try{
+    var r=await fetch('/api/files?path=.');
+    var d=await r.json();
+    var newMtimes={};
+    collectMtimes(d.entries,newMtimes);
+
+    // First load sets the baseline — nothing should be marked changed
+    var justChanged=findChangedSinceLastRefresh(fileTreeMtimes,newMtimes);
+
+    // Identify truly new files (not in previous baseline at all)
+    var justNew=[];
+    if(Object.keys(fileTreeMtimes).length>0){
+      for(var j=0;j<justChanged.length;j++){
+        if(!fileTreeMtimes[justChanged[j]])justNew.push(justChanged[j]);
+      }
+    }
+
+    // Only add to auditEditedPaths if these are real changes (not baseline)
+    justChanged.forEach(function(p){auditEditedPaths.add(p);});
+    fileTreeMtimes=newMtimes;
+    updateChangeCount();
+    t.innerHTML='';
+    renderExplorerTree(d.entries,t,0,justChanged,justNew);
+
+    // Auto-expand parents of just-changed files
+    if(justChanged.length>0){
+      justChanged.forEach(function(cp){
+        var parts=cp.split('/');
+        for(var i=1;i<parts.length;i++){
+          var parentPath=parts.slice(0,i).join('/');
+          t.querySelectorAll('.ft-dir').forEach(function(det){
+            if(det.dataset.path===parentPath)det.open=true;
+          });
+        }
+      });
+      // Scroll the first changed item into view in the tree
+      var firstItem=t.querySelector('.ft-item.changed,.ft-item.new-file,summary.changed,summary.new-file');
+      if(firstItem)firstItem.scrollIntoView({behavior:'smooth',block:'nearest'});
+
+      // Auto-open the changed file in the diff viewer
+      if(diffOpenPath&&justChanged.indexOf(diffOpenPath)!==-1){
+        // Currently-open file was updated — refresh it and scroll to diff
+        openDiffViewer(diffOpenPath,true);
+      }else{
+        // Open the first changed file automatically
+        openDiffViewer(justChanged[0],true);
+      }
+    }else if(diffOpenPath&&justChanged&&justChanged.indexOf(diffOpenPath)!==-1){
+      // No new changes detected but the open file was in the changed set
+      openDiffViewer(diffOpenPath,true);
+    }
+  }catch(e){
+    t.innerHTML='<div style="padding:16px;color:#f85149;font-size:12px;">Failed to load</div>';
+  }
+}
+
+function renderExplorerTree(entries,parent,depth,justChanged,justNew){
+  for(var i=0;i<entries.length;i++){
+    var entry=entries[i];
+    if(entry.type==='directory'){
+      var dirHasChanges=justChanged&&justChanged.some(function(p){return p.startsWith(entry.path+'/');});
+      var dirHasNew=justNew&&justNew.some(function(p){return p.startsWith(entry.path+'/');});
+      var autoExpand=entry.name==='memory'||entry.name==='skills'||dirHasChanges||dirHasNew;
+      var det=document.createElement('details');
+      det.className='ft-dir';
+      det.dataset.path=entry.path;
+      if(autoExpand)det.open=true;
+      var sum=document.createElement('summary');
+      if(dirHasNew)sum.classList.add('new-file');
+      else if(dirHasChanges)sum.classList.add('changed');
+      sum.style.paddingLeft=(depth*12+8)+'px';
+      var dirBadge='';
+      if(dirHasNew)dirBadge='<span class="ft-badge new pop">NEW</span>';
+      else if(dirHasChanges)dirBadge='<span class="ft-badge edited pop">EDITED</span>';
+      sum.innerHTML='<span class="ft-chevron">'+ICONS.chevronRight+'</span><span class="ft-icon folder">'+ICONS.folder+'</span><span class="ft-name">'+escHtml(entry.name)+'</span>'+dirBadge;
+      det.appendChild(sum);
+      var ch=document.createElement('div');
+      ch.className='ft-children';
+      if(entry.children)renderExplorerTree(entry.children,ch,depth+1,justChanged,justNew);
+      det.appendChild(ch);
+      parent.appendChild(det);
+    }else{
+      var fi=document.createElement('div');
+      fi.className='ft-item';
+      var isJustChanged=justChanged&&justChanged.indexOf(entry.path)!==-1;
+      var isJustNew=justNew&&justNew.indexOf(entry.path)!==-1;
+      var wasEdited=auditEditedPaths.has(entry.path);
+      if(isJustNew)fi.classList.add('new-file');
+      else if(isJustChanged)fi.classList.add('changed');
+      if(diffOpenPath===entry.path)fi.classList.add('active-viewer');
+      fi.style.paddingLeft=(depth*12+22)+'px';
+      var badgeHtml='';
+      var gutterHtml='';
+      if(isJustNew){
+        badgeHtml='<span class="ft-badge new pop">NEW</span>';
+        gutterHtml='<span class="ft-gutter edited"></span>';
+      }else if(isJustChanged){
+        badgeHtml='<span class="ft-badge edited pop">EDITED</span>';
+        gutterHtml='<span class="ft-gutter edited"></span>';
+      }else if(wasEdited){
+        badgeHtml='<span class="ft-badge edited" style="opacity:0.45">EDITED</span>';
+        gutterHtml='<span class="ft-gutter edited" style="opacity:0.3"></span>';
+      }
+      fi.innerHTML=gutterHtml+'<span class="ft-icon '+getFileIconClass(entry.name)+'">'+getFileIconSvg(entry.name)+'</span><span class="ft-name">'+escHtml(entry.name)+'</span>'+badgeHtml;
+      fi.onclick=(function(p){return function(){openDiffViewer(p,false);};})(entry.path);
+      fi.dataset.path=entry.path;
+      parent.appendChild(fi);
+    }
+  }
+}
+
+// ── Inline diff viewer (inside files panel) ──────────────────────────
+async function openDiffViewer(path,isAutoEdit,autoCloseMs){
+  if(autoCloseTimer){clearTimeout(autoCloseTimer);autoCloseTimer=null;}
+  var viewer=document.getElementById('diffViewer');
+  var pathEl=document.getElementById('dvPath');
+  var statusEl=document.getElementById('dvStatus');
+  var countdown=document.getElementById('dvCountdown');
+  var pre=document.getElementById('dvPre');
+
+  // Highlight active file in tree
+  document.querySelectorAll('#explorerTree .ft-item').forEach(function(el){
+    el.classList.toggle('active-viewer',el.dataset.path===path);
+  });
+
+  var isReopen=(diffOpenPath===path&&viewer.classList.contains('open'));
+  diffOpenPath=path;
+  pathEl.textContent=path.split('/').pop();
+  pathEl.title=path;
+
+  // Detect file type
+  var ext=path.split('.').pop().toLowerCase();
+  var isMd=ext==='md';
+  var isImage=/^(png|jpg|jpeg|gif|webp|svg|bmp|ico)$/.test(ext);
+  var mdToggle=document.getElementById('dvMdToggle');
+  var mdDiv=document.getElementById('dvMarkdown');
+  var imgDiv=document.getElementById('dvImage');
+
+  // Reset all content panels
+  mdToggle.classList.toggle('hidden',!isMd);
+  imgDiv.classList.add('hidden');
+  imgDiv.innerHTML='';
+  if(isMd){
+    dvMdActive=true;
+    mdToggle.classList.add('active');
+    pre.style.display='none';
+    mdDiv.classList.remove('hidden');
+  }else{
+    dvMdActive=false;
+    mdToggle.classList.remove('active');
+    pre.style.display='';
+    mdDiv.classList.add('hidden');
+  }
+  if(isImage){
+    pre.style.display='none';
+  }
+
+  if(isAutoEdit){
+    statusEl.className='dv-status edited';
+    statusEl.textContent='EDITED';
+  }else{
+    statusEl.className='dv-status viewing';
+    statusEl.textContent='VIEWING';
+  }
+
+  // Open the viewer panel
+  viewer.classList.add('open');
+  // Reset countdown
+  countdown.style.transition='none';
+  countdown.style.width='100%';
+  countdown.classList.remove('done');
+
+  if(!isReopen){
+    pre.innerHTML='<span class="dv-line" style="color:#484f58;">Loading...</span>';
+  }
+
+  // Image files — render directly, skip text parsing
+  if(isImage){
+    pre.innerHTML='';
+    imgDiv.classList.remove('hidden');
+    var img=document.createElement('img');
+    img.src='/api/file/raw?path='+encodeURIComponent(path)+'&t='+Date.now();
+    img.alt=path.split('/').pop();
+    img.onload=function(){
+      var meta=document.createElement('span');
+      meta.className='img-meta';
+      meta.textContent=img.naturalWidth+'×'+img.naturalHeight;
+      imgDiv.appendChild(meta);
+    };
+    imgDiv.appendChild(img);
+    // No auto-close for images
+    countdown.style.width='0';
+    return;
+  }
+
+  try{
+    var r=await fetch('/api/file?path='+encodeURIComponent(path));
+    var d=await r.json();
+    if(d.error){pre.innerHTML='<span class="dv-line" style="color:#f85149;">'+escHtml(d.error)+'</span>';return;}
+
+    var oldContent=fileContentCache[path]||'';
+    var newContent=d.content||'';
+    var isNewFile=!fileContentCache.hasOwnProperty(path);
+    fileContentCache[path]=newContent;
+    diffOpenContent=newContent;
+
+    var oldLines=oldContent?oldContent.split('\n'):[];
+    var newLines=newContent.split('\n');
+    var hasDiff=(oldContent.length>0&&oldContent!==newContent)||isNewFile;
+
+    pre.innerHTML='';
+    var maxStagger=Math.min(newLines.length,200);
+    for(var i=0;i<newLines.length;i++){
+      var span=document.createElement('span');
+      span.className='dv-line';
+      span.textContent=newLines[i];
+
+      var isChangedLine=hasDiff&&!isNewFile&&(i>=oldLines.length||newLines[i]!==oldLines[i]);
+      var isAddedLine=hasDiff&&(isNewFile||i>=oldLines.length);
+
+      if(isAddedLine){
+        span.classList.add('line-added');
+        var gm=document.createElement('span');
+        gm.className='dv-gutter g-added';
+        span.appendChild(gm);
+      }else if(isChangedLine){
+        span.classList.add('line-changed');
+        var gm2=document.createElement('span');
+        gm2.className='dv-gutter g-modified';
+        span.appendChild(gm2);
+      }
+      // Stagger entry for first open (no previous content)
+      if(!hasDiff&&!isReopen&&i<maxStagger){
+        span.classList.add('line-enter');
+        span.style.animationDelay=(i*6)+'ms';
+        span.style.opacity='0';
+      }
+      pre.appendChild(span);
+      pre.appendChild(document.createTextNode('\n'));
+    }
+
+    // Render markdown preview if .md file
+    if(isMd&&typeof marked!=='undefined'&&newContent){
+      mdDiv.innerHTML=marked.parse(newContent);
+    }
+
+    // Scroll to first changed line
+    if(hasDiff){
+      var firstChanged=pre.querySelector('.line-changed,.line-added');
+      if(firstChanged){
+        setTimeout(function(){
+          firstChanged.scrollIntoView({behavior:'smooth',block:'center'});
+        },80);
+      }
+    }
+
+    // Auto-close countdown for auto-opened edits
+    if(isAutoEdit){
+      var closeDelay=autoCloseMs||5000;
+      var barDuration=(closeDelay-500)/1000; // bar animation slightly shorter
+      // Kick off the countdown bar after a brief paint delay
+      requestAnimationFrame(function(){
+        requestAnimationFrame(function(){
+          countdown.style.transition='width '+barDuration+'s linear';
+          countdown.classList.add('done');
+        });
+      });
+      autoCloseTimer=setTimeout(function(){
+        autoCloseTimer=null;
+        // Only auto-close if still showing this same auto-edit
+        if(diffOpenPath===path)closeDiffViewer();
+      },closeDelay);
+    }else{
+      // Manual open — hide the countdown bar
+      countdown.style.width='0';
+    }
+  }catch(e){
+    pre.innerHTML='<span class="dv-line" style="color:#f85149;">Failed to load</span>';
+  }
+}
+
+var dvMdActive=false;
+function toggleMdView(){
+  var pre=document.getElementById('dvPre');
+  var md=document.getElementById('dvMarkdown');
+  var btn=document.getElementById('dvMdToggle');
+  dvMdActive=!dvMdActive;
+  btn.classList.toggle('active',dvMdActive);
+  if(dvMdActive){
+    pre.style.display='none';
+    md.classList.remove('hidden');
+    if(typeof marked!=='undefined'&&diffOpenContent){
+      md.innerHTML=marked.parse(diffOpenContent);
+    }
+  }else{
+    pre.style.display='';
+    md.classList.add('hidden');
+  }
+}
+
+function closeDiffViewer(){
+  if(autoCloseTimer){clearTimeout(autoCloseTimer);autoCloseTimer=null;}
+  document.getElementById('diffViewer').classList.remove('open');
+  document.querySelectorAll('#explorerTree .ft-item.active-viewer').forEach(function(el){
+    el.classList.remove('active-viewer');
+  });
+  diffOpenPath=null;
+  diffOpenContent='';
+}
+
+function refreshFileTree(){
+  if(!auditMode)return;
+  if(refreshDebounceTimer)clearTimeout(refreshDebounceTimer);
+  refreshDebounceTimer=setTimeout(function(){loadExplorerTree();},500);
+}
+
+document.addEventListener('keydown',function(e){if(e.key==='Escape'&&diffOpenPath)closeDiffViewer();});
 
 connectWS();
 </script>

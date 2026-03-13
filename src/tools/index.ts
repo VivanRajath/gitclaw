@@ -6,6 +6,7 @@ import { createWriteTool } from "./write.js";
 import { createMemoryTool } from "./memory.js";
 import { createTaskTrackerTool } from "./task-tracker.js";
 import { createSkillLearnerTool } from "./skill-learner.js";
+import { createCapturePhotoTool } from "./capture-photo.js";
 import { createSandboxCliTool } from "./sandbox-cli.js";
 import { createSandboxReadTool } from "./sandbox-read.js";
 import { createSandboxWriteTool } from "./sandbox-write.js";
@@ -38,6 +39,7 @@ export function createBuiltinTools(config: BuiltinToolsConfig): AgentTool<any>[]
 		createReadTool(config.dir),
 		createWriteTool(config.dir),
 		createMemoryTool(config.dir),
+		createCapturePhotoTool(config.dir),
 	];
 
 	// Add learning tools if gitagentDir is available

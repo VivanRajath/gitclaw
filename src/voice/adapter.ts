@@ -2,7 +2,7 @@ export type AdapterBackend = "openai-realtime" | "gemini-live";
 
 // Browser -> Server messages
 export interface ClientAudioMessage { type: "audio"; audio: string; }
-export interface ClientVideoFrameMessage { type: "video_frame"; frame: string; mimeType: string; }
+export interface ClientVideoFrameMessage { type: "video_frame"; frame: string; mimeType: string; source?: "camera" | "screen"; }
 export interface ClientTextMessage { type: "text"; text: string; }
 export interface ClientFileMessage { type: "file"; name: string; mimeType: string; data: string; text?: string; }
 export type ClientMessage = ClientAudioMessage | ClientVideoFrameMessage | ClientTextMessage | ClientFileMessage;
@@ -16,7 +16,9 @@ export interface ServerToolCall { type: "tool_call"; toolName: string; args: Rec
 export interface ServerToolResult { type: "tool_result"; toolName: string; content: string; isError: boolean; }
 export interface ServerAgentThinking { type: "agent_thinking"; text: string; }
 export interface ServerError { type: "error"; message: string; }
-export type ServerMessage = ServerAudioDelta | ServerTranscript | ServerAgentWorking | ServerAgentDone | ServerToolCall | ServerToolResult | ServerAgentThinking | ServerError;
+export interface ServerInterrupt { type: "interrupt"; }
+export interface ServerFilesChanged { type: "files_changed"; }
+export type ServerMessage = ServerAudioDelta | ServerTranscript | ServerAgentWorking | ServerAgentDone | ServerToolCall | ServerToolResult | ServerAgentThinking | ServerError | ServerInterrupt | ServerFilesChanged;
 
 // Adapter interface — adapters receive ClientMessages, emit ServerMessages
 export interface MultimodalAdapter {
@@ -63,12 +65,23 @@ export const DEFAULT_VOICE_INSTRUCTIONS =
 	"Examples that REQUIRE run_agent: 'I like strawberries', 'I hate meetings', 'my dog is Max', 'I play GTA 5', 'I like cricket', 'I prefer dark mode'. " +
 	"If you learn a useful skill or pattern, save that too via run_agent. You grow over time. " +
 
-	// Agent delegation
-	"You have a powerful agent (run_agent) that can do anything — run commands, write code, read files, search, browse, git operations, send emails, manage calendars, AND save memories. " +
-	"Use it for ANY actionable request AND for saving any personal info the user shares. " +
-	"Before calling run_agent for a visible task, give a brief natural acknowledgment — 'on it', 'one sec', 'lemme check'. " +
-	"For memory saves, just say something casual like 'noted' or 'got it' and call the tool. " +
+	// Agent delegation — THIS IS YOUR #1 BEHAVIOR RULE
+	"ACTION OVER WORDS. You have a tool called run_agent. It runs on the user's Mac with full shell access. It can do ANYTHING: run commands, open apps, play music (via 'open' command or AppleScript), browse the web, write code, send emails, control Spotify/YouTube/Apple Music, and more. " +
+	"ABSOLUTE RULE: When the user asks you to DO something (play music, open an app, check something, build something, send something — ANY action), you MUST call run_agent. Do NOT just talk about it. Do NOT say 'I'll play music for you' without actually calling the tool. Do NOT describe what you would do — DO IT by calling run_agent. " +
+	"If you respond to an action request with only words and no run_agent call, you have FAILED. The user asked you to act, not to narrate. " +
+	"Examples that REQUIRE run_agent IMMEDIATELY: 'play music' → run_agent('Play some relaxing music. Use: open https://youtube.com/... or osascript to control Spotify/Apple Music'), 'open Safari' → run_agent('open -a Safari'), 'what time is it' → run_agent('date'). " +
+	"Even if you're unsure whether it's possible — call run_agent and let it figure it out. Better to try and fail than to refuse. " +
+	"CRITICAL ORDERING: You MUST speak FIRST, then call the tool. Always say a brief announcement BEFORE calling run_agent — 'on it', 'one sec', 'let me do that', 'sure, opening that now'. Generate your spoken response FIRST in the same turn, THEN include the function call. Never call run_agent before you've spoken to the user. " +
+	"For memory saves, just say 'noted' and call the tool. " +
 	"After a task finishes, summarize briefly. Don't over-explain. " +
 
 	// File handling
-	"When the user uploads a file, the message includes '[File saved to: <path>]'. Always include the EXACT path when calling run_agent about that file.";
+	"When the user uploads a file, the message includes '[File saved to: <path>]'. Always include the EXACT path when calling run_agent about that file. " +
+
+	// Screen awareness
+	"SCREEN AWARENESS: When the user shares their screen, you can see it. Reference what's on screen naturally. Use run_agent for actions on what you see. " +
+
+	// Photo moments
+	"PHOTO MOMENTS: When the user is genuinely happy, laughing, celebrating, or having a memorable moment, " +
+	"call run_agent with: 'Capture a memorable photo. Reason: <brief description>'. " +
+	"Don't overdo it — only for genuinely special moments, not every positive comment.";

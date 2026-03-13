@@ -44,6 +44,10 @@ export const taskTrackerSchema = Type.Object({
 	skill_used: Type.Optional(Type.String({ description: "Name of skill used, if any (for end)" })),
 });
 
+export const capturePhotoSchema = Type.Object({
+	reason: Type.String({ description: "Why this moment is being captured (e.g. 'user celebrating project launch')" }),
+});
+
 export const skillLearnerSchema = Type.Object({
 	action: StringEnum(["evaluate", "crystallize", "status", "review", "update", "delete"], { description: "Action to perform" }),
 	task_id: Type.Optional(Type.String({ description: "Task ID (for evaluate/crystallize)" })),
