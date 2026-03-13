@@ -141,6 +141,8 @@
   .conv-msg { margin-bottom: 3px; animation: fade-in 0.2s ease-out; }
   .conv-msg.user { color: #b1bac4; }
   .conv-msg.user .label { color: #58a6ff; font-weight: 600; }
+  .conv-msg.telegram { border-left: 2px solid #2AABEE; padding-left: 8px; }
+  .conv-msg.telegram .label.tg { color: #2AABEE; }
   .conv-msg.assistant { color: #e6edf3; }
   .conv-msg.assistant .label { color: #3fb950; font-weight: 600; }
   .conv-msg.tool { color: #d29922; }
@@ -584,6 +586,63 @@
   .tk-btn.connected { background: rgba(63,185,80,0.12); color: #3fb950; border: 1px solid #23612c; }
   .tk-btn.connected:hover { background: rgba(248,81,73,0.12); color: #f85149; border-color: #da3633; }
 
+  /* Communication view */
+  .comms-view { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+  .comms-view.hidden { display: none; }
+  .comms-header {
+    display: flex; flex-direction: column; gap: 4px;
+    padding: 16px 20px; border-bottom: 1px solid #21262d;
+  }
+  .comms-header h2 { font-size: 15px; font-weight: 600; font-family: 'IBM Plex Mono', monospace; color: #e6edf3; margin: 0; }
+  .comms-subtitle { font-size: 12px; color: #484f58; }
+  .comms-content { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+  .comms-card {
+    background: #161b22; border: 1px solid #21262d; border-radius: 10px; padding: 20px;
+    display: flex; flex-direction: column; gap: 16px; max-width: 520px;
+  }
+  .comms-card-top { display: flex; align-items: flex-start; gap: 14px; }
+  .comms-card-icon {
+    width: 40px; height: 40px; border-radius: 10px; background: #0d1117;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    color: #58a6ff;
+  }
+  .comms-card-icon svg { width: 24px; height: 24px; }
+  .comms-card-icon.telegram { color: #2AABEE; }
+  .comms-card-info { display: flex; flex-direction: column; gap: 3px; flex: 1; }
+  .comms-card-name { font-size: 14px; font-weight: 600; color: #e6edf3; }
+  .comms-card-desc { font-size: 11px; color: #8b949e; line-height: 1.5; }
+  .comms-status {
+    font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 10px;
+    flex-shrink: 0; text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .comms-status.connected { background: rgba(63,185,80,0.12); color: #3fb950; }
+  .comms-status.disconnected { background: rgba(139,148,158,0.1); color: #484f58; }
+  .comms-status.error { background: rgba(248,81,73,0.12); color: #f85149; }
+  .comms-card-config { display: flex; flex-direction: column; gap: 12px; }
+  .comms-field { display: flex; flex-direction: column; gap: 5px; }
+  .comms-field label {
+    font-size: 11px; font-weight: 600; color: #8b949e; text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+  .comms-field input {
+    background: #0d1117; border: 1px solid #21262d; border-radius: 6px; padding: 8px 12px;
+    color: #e6edf3; font-family: 'IBM Plex Mono', monospace; font-size: 12px;
+    outline: none; transition: border-color 0.15s;
+  }
+  .comms-field input:focus { border-color: #58a6ff; }
+  .comms-field input::placeholder { color: #30363d; }
+  .comms-hint { font-size: 10px; color: #484f58; }
+  .comms-hint a { color: #58a6ff; text-decoration: none; }
+  .comms-hint a:hover { text-decoration: underline; }
+  .comms-card-actions { display: flex; gap: 8px; }
+  .comms-card.is-connected .comms-card-config { display: none; }
+  .comms-bot-info {
+    display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+    background: rgba(63,185,80,0.06); border: 1px solid #23612c; border-radius: 8px;
+  }
+  .comms-bot-info .bot-name { font-size: 13px; font-weight: 600; color: #3fb950; }
+  .comms-bot-info .bot-username { font-size: 11px; color: #8b949e; }
+
   @keyframes fade-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
   @media (max-width: 700px) {
     .chat-view { flex-direction: column; }
@@ -606,6 +665,7 @@
       <button class="view-tab active" id="tabChat" onclick="switchView('chat')">Chat</button>
       <!-- <button class="view-tab" id="tabFiles" onclick="switchView('files')">Files</button> -->
       <button class="view-tab" id="tabIntegrations" onclick="switchView('integrations')">Integrations</button>
+      <button class="view-tab" id="tabComms" onclick="switchView('comms')">Communication</button>
     </div>
   </div>
   <div class="header-right">
@@ -737,12 +797,52 @@
       <div class="integrations-empty" id="integrationsEmpty">Loading...</div>
     </div>
   </div>
+  <div class="comms-view hidden" id="commsView">
+    <div class="comms-header">
+      <h2>Communication</h2>
+      <span class="comms-subtitle">Connect messaging channels so your agent can send and receive messages</span>
+    </div>
+    <div class="comms-content">
+      <div class="comms-card" id="telegramCard">
+        <div class="comms-card-top">
+          <div class="comms-card-icon">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69.01-.03.01-.14-.07-.2-.08-.06-.19-.04-.28-.02-.12.03-2.02 1.28-5.69 3.77-.54.37-1.03.55-1.47.54-.48-.01-1.41-.27-2.1-.5-.85-.28-1.52-.43-1.46-.91.03-.25.38-.51 1.05-.78 4.12-1.79 6.87-2.97 8.26-3.54 3.93-1.62 4.75-1.9 5.28-1.91.12 0 .37.03.54.17.14.12.18.28.2.47-.01.06.01.24 0 .37z"/></svg>
+          </div>
+          <div class="comms-card-info">
+            <span class="comms-card-name">Telegram</span>
+            <span class="comms-card-desc">Connect a Telegram bot to chat with your agent from anywhere</span>
+          </div>
+          <span class="comms-status" id="tgStatus"></span>
+        </div>
+        <div class="comms-card-config" id="tgConfig">
+          <div class="comms-field">
+            <label>Bot Token</label>
+            <input type="password" id="tgToken" placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v..." spellcheck="false" autocomplete="off" />
+            <span class="comms-hint">Get one from <a href="https://t.me/BotFather" target="_blank">@BotFather</a> on Telegram</span>
+          </div>
+        </div>
+        <div class="comms-card-actions">
+          <button class="tk-btn connect" id="tgConnectBtn" onclick="toggleTelegram()">Connect</button>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/marked@15.0.7/marked.min.js"></script>
 <!-- <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script> -->
 <script>
-let currentView='chat',filesLoaded=false,integrationsLoaded=false;
-function switchView(v){currentView=v;document.getElementById('chatView').classList.toggle('hidden',v!=='chat');/* document.getElementById('filesView').classList.toggle('hidden',v!=='files'); */document.getElementById('integrationsView').classList.toggle('hidden',v!=='integrations');document.getElementById('tabChat').classList.toggle('active',v==='chat');/* document.getElementById('tabFiles').classList.toggle('active',v==='files'); */document.getElementById('tabIntegrations').classList.toggle('active',v==='integrations');/* if(v==='files'&&!filesLoaded){loadFileTree();filesLoaded=true;}if(v==='files'&&monacoEditor)monacoEditor.layout(); */if(v==='integrations'&&!integrationsLoaded){loadToolkits();integrationsLoaded=true;}}
+let currentView='chat',filesLoaded=false,integrationsLoaded=false,commsLoaded=false;
+function switchView(v){
+  currentView=v;
+  document.getElementById('chatView').classList.toggle('hidden',v!=='chat');
+  document.getElementById('integrationsView').classList.toggle('hidden',v!=='integrations');
+  document.getElementById('commsView').classList.toggle('hidden',v!=='comms');
+  document.getElementById('tabChat').classList.toggle('active',v==='chat');
+  document.getElementById('tabIntegrations').classList.toggle('active',v==='integrations');
+  document.getElementById('tabComms').classList.toggle('active',v==='comms');
+  if(v==='integrations'&&!integrationsLoaded){loadToolkits();integrationsLoaded=true;}
+  if(v==='comms'&&!commsLoaded){loadTelegramStatus();commsLoaded=true;}
+}
 
 /* FILES/MONACO DISABLED
 let monacoEditor=null,monacoReady=false;
@@ -791,7 +891,11 @@ function handleServerMessage(m){switch(m.type){
   case'audio_delta':playAudioDelta(m.audio);break;
   case'interrupt':flushAudio();break;
   case'transcript':
-    if(m.role==='user'&&!m.partial)appendConv('<span class="label">You: </span>'+escHtml(m.text),'user');
+    if(m.role==='user'&&!m.partial){
+      var isTg=m.text&&m.text.startsWith('[Telegram]');
+      var label=isTg?'<span class="label tg">Telegram: </span>':'<span class="label">You: </span>';
+      appendConv(label+escHtml(isTg?m.text.replace(/^\[Telegram\]\s*/,''):m.text),isTg?'user telegram':'user');
+    }
     else if(m.role==='assistant'){if(m.partial)assistantText+=m.text;else{if(assistantText){appendConv('<span class="label">Assistant: </span>'+escHtml(assistantText),'assistant');assistantText='';}else appendConv('<span class="label">Assistant: </span>'+escHtml(m.text),'assistant');}}
     break;
   case'agent_working':
@@ -1157,6 +1261,91 @@ window.addEventListener('message',function(e){
 });
 // Also refresh when window regains focus (in case popup completed)
 window.addEventListener('focus',function(){if(currentView==='integrations'&&integrationsLoaded)loadToolkits();});
+
+// ── TELEGRAM / COMMUNICATION ────────────────────────────────────────
+async function loadTelegramStatus(){
+  var card=document.getElementById('telegramCard');
+  var statusEl=document.getElementById('tgStatus');
+  var btn=document.getElementById('tgConnectBtn');
+  var tokenInput=document.getElementById('tgToken');
+  var configDiv=document.getElementById('tgConfig');
+  try{
+    var r=await fetch('/api/telegram/status');
+    var d=await r.json();
+    if(d.connected){
+      card.classList.add('is-connected');
+      statusEl.className='comms-status connected';
+      statusEl.textContent='Connected';
+      btn.className='tk-btn connected';
+      btn.textContent='Disconnect';
+      var existing=card.querySelector('.comms-bot-info');
+      if(existing)existing.remove();
+      if(d.botName){
+        var info=document.createElement('div');
+        info.className='comms-bot-info';
+        info.innerHTML='<span class="bot-name">'+escHtml(d.botName)+'</span><span class="bot-username">@'+escHtml(d.botUsername||'')+'</span>';
+        configDiv.parentNode.insertBefore(info,configDiv);
+      }
+    }else{
+      card.classList.remove('is-connected');
+      statusEl.className='comms-status disconnected';
+      statusEl.textContent='Not connected';
+      btn.className='tk-btn connect';
+      btn.textContent='Connect';
+      var existing2=card.querySelector('.comms-bot-info');
+      if(existing2)existing2.remove();
+      if(d.hasToken)tokenInput.placeholder='Token saved (enter new to change)';
+    }
+  }catch(e){
+    statusEl.className='comms-status error';
+    statusEl.textContent='Error';
+  }
+}
+
+async function toggleTelegram(){
+  var card=document.getElementById('telegramCard');
+  var btn=document.getElementById('tgConnectBtn');
+  var tokenInput=document.getElementById('tgToken');
+
+  if(card.classList.contains('is-connected')){
+    btn.disabled=true;btn.textContent='Disconnecting...';
+    try{
+      await fetch('/api/telegram/disconnect',{method:'POST'});
+    }catch(e){}
+    btn.disabled=false;
+    loadTelegramStatus();
+    return;
+  }
+
+  var token=tokenInput.value.trim();
+  if(!token&&!tokenInput.placeholder.includes('saved')){
+    tokenInput.style.borderColor='#f85149';
+    tokenInput.focus();
+    return;
+  }
+  btn.disabled=true;btn.textContent='Connecting...';
+  tokenInput.style.borderColor='';
+  try{
+    var r=await fetch('/api/telegram/connect',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({token:token||undefined})
+    });
+    var d=await r.json();
+    if(d.error){
+      document.getElementById('tgStatus').className='comms-status error';
+      document.getElementById('tgStatus').textContent=d.error;
+      btn.disabled=false;btn.textContent='Connect';
+      return;
+    }
+  }catch(e){
+    btn.disabled=false;btn.textContent='Connect';
+    return;
+  }
+  btn.disabled=false;
+  tokenInput.value='';
+  loadTelegramStatus();
+}
 
 // ── AUDIT MODE & FILE EXPLORER ──────────────────────────────────────
 var ICONS={chevronRight:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9,18 15,12 9,6"/></svg>',chevronDown:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6,9 12,15 18,9"/></svg>',folder:'<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>',folderOpen:'<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M5 19h14a2 2 0 001.84-1.22L23 12H5.24a2 2 0 00-1.84 1.22L1 19h2a2 2 0 002-2V7a2 2 0 012-2h4l2 2h6a2 2 0 012 2v1"/></svg>',file:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/></svg>',fileCode:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/><path d="M10 12l-2 2 2 2"/><path d="M14 12l2 2-2 2"/></svg>'};

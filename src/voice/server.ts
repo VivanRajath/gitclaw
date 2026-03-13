@@ -462,6 +462,191 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 		console.log(dim("[voice] Composio integration enabled"));
 	}
 
+	// ── Telegram bot state ──────────────────────────────────────────────
+	let telegramToken = process.env.TELEGRAM_BOT_TOKEN || "";
+	let telegramBotInfo: any = null;
+	let telegramPolling = false;
+	let telegramPollTimer: ReturnType<typeof setTimeout> | null = null;
+	let telegramOffset = 0;
+
+	function stopTelegramPolling() {
+		telegramPolling = false;
+		if (telegramPollTimer) { clearTimeout(telegramPollTimer); telegramPollTimer = null; }
+	}
+
+	/** Broadcast a message to all connected browser WebSocket clients */
+	function broadcastToBrowsers(msg: ServerMessage) {
+		const payload = JSON.stringify(msg);
+		for (const client of wss.clients) {
+			if (client.readyState === 1) client.send(payload);
+		}
+	}
+
+	async function downloadTelegramFile(fileId: string, agentDir: string): Promise<{ path: string; name: string } | null> {
+		try {
+			const fRes = await fetch(`https://api.telegram.org/bot${telegramToken}/getFile?file_id=${fileId}`);
+			const fData = await fRes.json() as any;
+			if (!fData.ok) return null;
+			const filePath = fData.result.file_path as string;
+			const ext = filePath.split(".").pop() || "jpg";
+			const name = `telegram_${Date.now()}.${ext}`;
+			const dlUrl = `https://api.telegram.org/file/bot${telegramToken}/${filePath}`;
+			const dlRes = await fetch(dlUrl);
+			const buffer = Buffer.from(await dlRes.arrayBuffer());
+			const wsDir = join(agentDir, "workspace");
+			mkdirSync(wsDir, { recursive: true });
+			const savePath = join(wsDir, name);
+			writeFileSync(savePath, buffer);
+			return { path: `workspace/${name}`, name };
+		} catch {
+			return null;
+		}
+	}
+
+	function startTelegramPolling(agentDir: string, serverOpts: VoiceServerOptions) {
+		if (telegramPolling) return;
+		telegramPolling = true;
+		console.log(dim("[voice] Telegram polling started"));
+
+		async function poll() {
+			if (!telegramPolling) return;
+			try {
+				const res = await fetch(
+					`https://api.telegram.org/bot${telegramToken}/getUpdates?offset=${telegramOffset}&timeout=30&allowed_updates=["message"]`,
+				);
+				const data = await res.json() as any;
+				if (data.ok && data.result) {
+					for (const update of data.result) {
+						telegramOffset = update.update_id + 1;
+						const msg = update.message;
+						if (!msg) continue;
+
+						const chatId = msg.chat.id;
+						const fromName = msg.from?.first_name || "User";
+						let userText = msg.text || msg.caption || "";
+						let imageContext = "";
+
+						// Handle photo messages
+						if (msg.photo && msg.photo.length > 0) {
+							const largest = msg.photo[msg.photo.length - 1];
+							const dl = await downloadTelegramFile(largest.file_id, agentDir);
+							if (dl) {
+								imageContext = ` [Image saved to ${dl.path}]`;
+								// Notify browser of file change
+								broadcastToBrowsers({ type: "files_changed" } as any);
+							}
+						}
+
+						// Handle document/file messages
+						if (msg.document) {
+							const dl = await downloadTelegramFile(msg.document.file_id, agentDir);
+							if (dl) {
+								imageContext = ` [File saved to ${dl.path}: ${msg.document.file_name || dl.name}]`;
+								broadcastToBrowsers({ type: "files_changed" } as any);
+							}
+						}
+
+						if (!userText && !imageContext) continue;
+
+						const fullText = `${userText}${imageContext}`.trim();
+						console.log(dim(`[telegram] ${fromName}: ${fullText.slice(0, 100)}`));
+
+						// Save to shared chat history & broadcast to web UI
+						const userMsg: ServerMessage = { type: "transcript", role: "user", text: `[Telegram] ${fromName}: ${fullText}` };
+						appendMessage(serverOpts.agentDir, activeBranch, userMsg);
+						broadcastToBrowsers(userMsg);
+
+						// Send typing indicator
+						await fetch(`https://api.telegram.org/bot${telegramToken}/sendChatAction`, {
+							method: "POST",
+							headers: { "Content-Type": "application/json" },
+							body: JSON.stringify({ chat_id: chatId, action: "typing" }),
+						}).catch(() => {});
+
+						// Run agent query
+						try {
+							const agentWorking: ServerMessage = { type: "agent_working", query: fullText };
+							broadcastToBrowsers(agentWorking);
+							appendMessage(serverOpts.agentDir, activeBranch, agentWorking);
+
+							const result = query({
+								prompt: `[Telegram message from ${fromName}]: ${fullText}`,
+								dir: agentDir,
+								model: serverOpts.model,
+								env: serverOpts.env,
+								maxTurns: 10,
+							});
+							let reply = "";
+							for await (const m of result) {
+								if (m.type === "assistant" && m.content) reply += m.content;
+							}
+							reply = reply.trim();
+
+							// Save agent response to shared history & broadcast
+							const doneMsg: ServerMessage = { type: "agent_done", result: reply.slice(0, 500) };
+							appendMessage(serverOpts.agentDir, activeBranch, doneMsg);
+							broadcastToBrowsers(doneMsg);
+
+							const assistantMsg: ServerMessage = { type: "transcript", role: "assistant", text: reply };
+							appendMessage(serverOpts.agentDir, activeBranch, assistantMsg);
+							broadcastToBrowsers(assistantMsg);
+
+							if (reply) {
+								// Split long messages (Telegram 4096 char limit)
+								const chunks: string[] = [];
+								for (let i = 0; i < reply.length; i += 4096) {
+									chunks.push(reply.slice(i, i + 4096));
+								}
+								for (const chunk of chunks) {
+									await fetch(`https://api.telegram.org/bot${telegramToken}/sendMessage`, {
+										method: "POST",
+										headers: { "Content-Type": "application/json" },
+										body: JSON.stringify({ chat_id: chatId, text: chunk, parse_mode: "Markdown" }),
+									}).catch(async () => {
+										// Fallback without Markdown if parsing fails
+										await fetch(`https://api.telegram.org/bot${telegramToken}/sendMessage`, {
+											method: "POST",
+											headers: { "Content-Type": "application/json" },
+											body: JSON.stringify({ chat_id: chatId, text: chunk }),
+										}).catch(() => {});
+									});
+								}
+							}
+
+							// Notify browser of any file changes from agent
+							broadcastToBrowsers({ type: "files_changed" } as any);
+						} catch (err: any) {
+							console.error(dim(`[telegram] Agent error: ${err.message}`));
+							await fetch(`https://api.telegram.org/bot${telegramToken}/sendMessage`, {
+								method: "POST",
+								headers: { "Content-Type": "application/json" },
+								body: JSON.stringify({ chat_id: chatId, text: "Sorry, I encountered an error processing your message." }),
+							}).catch(() => {});
+						}
+					}
+				}
+			} catch (err: any) {
+				console.error(dim(`[telegram] Poll error: ${err.message}`));
+			}
+			if (telegramPolling) telegramPollTimer = setTimeout(poll, 500);
+		}
+		poll();
+	}
+
+	// Auto-connect if token is already configured
+	if (telegramToken) {
+		fetch(`https://api.telegram.org/bot${telegramToken}/getMe`)
+			.then((r) => r.json() as Promise<any>)
+			.then((d) => {
+				if (d.ok) {
+					telegramBotInfo = d.result;
+					startTelegramPolling(agentRoot, opts);
+					console.log(dim(`[voice] Telegram bot connected: @${d.result.username}`));
+				}
+			})
+			.catch(() => {});
+	}
+
 	/** Resolve and validate a requested path stays within agentDir */
 	function safePath(reqPath: string): string | null {
 		const abs = resolve(agentRoot, reqPath);
@@ -613,6 +798,53 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 			} catch (err: any) {
 				jsonReply(res, 500, { error: err.message });
 			}
+
+		// ── Telegram bot routes ─────────────────────────────────────────
+		} else if (url.pathname === "/api/telegram/status" && req.method === "GET") {
+			jsonReply(res, 200, {
+				connected: telegramPolling,
+				botName: telegramBotInfo?.first_name || null,
+				botUsername: telegramBotInfo?.username || null,
+				hasToken: !!telegramToken,
+			});
+
+		} else if (url.pathname === "/api/telegram/connect" && req.method === "POST") {
+			const body = await readBody(req);
+			try {
+				const parsed = JSON.parse(body);
+				if (parsed.token) telegramToken = parsed.token;
+			} catch { /* use existing token */ }
+			if (!telegramToken) return jsonReply(res, 400, { error: "No bot token provided" });
+
+			// Save token to .env for persistence
+			const envPath = join(agentRoot, ".env");
+			let envContent = "";
+			try { envContent = readFileSync(envPath, "utf-8"); } catch { /* new file */ }
+			if (envContent.includes("TELEGRAM_BOT_TOKEN=")) {
+				envContent = envContent.replace(/^TELEGRAM_BOT_TOKEN=.*$/m, `TELEGRAM_BOT_TOKEN=${telegramToken}`);
+			} else {
+				envContent += `\nTELEGRAM_BOT_TOKEN=${telegramToken}\n`;
+			}
+			writeFileSync(envPath, envContent, "utf-8");
+
+			// Validate token by calling getMe
+			try {
+				const meRes = await fetch(`https://api.telegram.org/bot${telegramToken}/getMe`);
+				const meData = await meRes.json() as any;
+				if (!meData.ok) return jsonReply(res, 400, { error: meData.description || "Invalid token" });
+				telegramBotInfo = meData.result;
+
+				// Start polling
+				startTelegramPolling(agentRoot, opts);
+				jsonReply(res, 200, { ok: true, botName: telegramBotInfo.first_name, botUsername: telegramBotInfo.username });
+			} catch (err: any) {
+				jsonReply(res, 500, { error: err.message });
+			}
+
+		} else if (url.pathname === "/api/telegram/disconnect" && req.method === "POST") {
+			stopTelegramPolling();
+			telegramBotInfo = null;
+			jsonReply(res, 200, { ok: true });
 
 		// ── Composio OAuth callback ─────────────────────────────────────
 		} else if (url.pathname === "/api/composio/callback") {
@@ -938,6 +1170,8 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 	console.log(dim(`[voice] Open http://localhost:${port} in your browser`));
 
 	return async () => {
+		// Stop Telegram polling
+		stopTelegramPolling();
 		// Gracefully close WebSocket connections to trigger close handlers (journal, mood, etc.)
 		for (const client of wss.clients) {
 			client.close(1000, "Server shutting down");
