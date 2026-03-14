@@ -1,9 +1,10 @@
 import WebSocket from "ws";
-import type {
-	MultimodalAdapter,
-	MultimodalAdapterConfig,
-	ClientMessage,
-	ServerMessage,
+import {
+	DEFAULT_VOICE_INSTRUCTIONS,
+	type MultimodalAdapter,
+	type MultimodalAdapterConfig,
+	type ClientMessage,
+	type ServerMessage,
 } from "./adapter.js";
 
 const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
@@ -12,8 +13,10 @@ export class OpenAIRealtimeAdapter implements MultimodalAdapter {
 	private ws: WebSocket | null = null;
 	private config: MultimodalAdapterConfig;
 	private latestVideoFrame: { frame: string; mimeType: string } | null = null;
+	private latestScreenFrame: { frame: string; mimeType: string } | null = null;
 	private onMessage: ((msg: ServerMessage) => void) | null = null;
 	private toolHandler: ((query: string) => Promise<string>) | null = null;
+	private interrupted = false;
 
 	constructor(config: MultimodalAdapterConfig) {
 		this.config = config;
@@ -71,11 +74,17 @@ export class OpenAIRealtimeAdapter implements MultimodalAdapter {
 				});
 				break;
 
-			case "video_frame":
+			case "video_frame": {
 				// OpenAI doesn't support continuous video. Store latest frame and
 				// inject it as an image on the next user turn via conversation item.
-				this.latestVideoFrame = { frame: msg.frame, mimeType: msg.mimeType };
+				const source = msg.source || "camera";
+				if (source === "screen") {
+					this.latestScreenFrame = { frame: msg.frame, mimeType: msg.mimeType };
+				} else {
+					this.latestVideoFrame = { frame: msg.frame, mimeType: msg.mimeType };
+				}
 				break;
+			}
 
 			case "text": {
 				// Send text as a user conversation item, optionally with latest video frame
@@ -102,6 +111,29 @@ export class OpenAIRealtimeAdapter implements MultimodalAdapter {
 				this.sendRaw({ type: "response.create" });
 				break;
 			}
+
+			case "file": {
+				const content: any[] = [];
+
+				if (msg.mimeType.startsWith("image/")) {
+					content.push({
+						type: "input_image",
+						image_url: `data:${msg.mimeType};base64,${msg.data}`,
+					});
+					content.push({ type: "input_text", text: msg.text || `[User attached image: ${msg.name}]` });
+				} else {
+					const decoded = Buffer.from(msg.data, "base64").toString("utf-8");
+					const label = msg.text ? `${msg.text}\n\n` : "";
+					content.push({ type: "input_text", text: `${label}[File: ${msg.name}]\n\`\`\`\n${decoded}\n\`\`\`` });
+				}
+
+				this.sendRaw({
+					type: "conversation.item.create",
+					item: { type: "message", role: "user", content },
+				});
+				this.sendRaw({ type: "response.create" });
+				break;
+			}
 		}
 	}
 
@@ -121,12 +153,16 @@ export class OpenAIRealtimeAdapter implements MultimodalAdapter {
 	 * can see it when generating the next response (e.g. after a voice turn).
 	 */
 	private injectVideoFrame(): void {
-		if (!this.latestVideoFrame) return;
+		// Prefer screen frame over camera — it provides more useful context
+		const isScreen = !!this.latestScreenFrame;
+		const frame = this.latestScreenFrame || this.latestVideoFrame;
+		if (!frame) return;
 
-		const frame = this.latestVideoFrame;
+		// Clear both so we don't inject stale frames
+		this.latestScreenFrame = null;
 		this.latestVideoFrame = null;
 
-		console.log(dim("[voice] Injecting video frame into conversation"));
+		console.log(dim(`[voice] Injecting ${isScreen ? "screen" : "camera"} frame into conversation`));
 		this.sendRaw({
 			type: "conversation.item.create",
 			item: {
@@ -141,11 +177,7 @@ export class OpenAIRealtimeAdapter implements MultimodalAdapter {
 	}
 
 	private sendSessionUpdate(): void {
-		const instructions = this.config.instructions ||
-			"You are a voice interface for GitClaw, a powerful AI agent with access to the terminal, file system, and git. " +
-			"You MUST use the run_agent tool for ANY request that involves doing something — running commands, opening apps, reading files, writing code, searching, browsing, installing packages, git operations, or anything actionable. " +
-			"Only respond directly for simple greetings, clarifying questions, or when the user explicitly asks YOU a question. " +
-			"When in doubt, use run_agent. Speak concisely — summarize the tool result in 1-2 sentences.";
+		const instructions = this.config.instructions || DEFAULT_VOICE_INSTRUCTIONS;
 
 		this.sendRaw({
 			type: "session.update",
@@ -161,17 +193,18 @@ export class OpenAIRealtimeAdapter implements MultimodalAdapter {
 					create_response: true,
 				},
 				input_audio_transcription: { model: "whisper-1" },
+				tool_choice: "auto",
 				tools: [
 					{
 						type: "function",
 						name: "run_agent",
-						description: "Execute any request through the gitclaw agent. It has full access to the terminal (can run any shell command, open apps, install packages), file system (read/write/create files), git operations, and persistent memory. Use this for ALL actionable requests.",
+						description: "Your ONLY way to take action. This agent runs on the user's Mac with full shell access. It can: run ANY shell command, open apps (open -a Spotify), play music (osascript, afplay, open URLs), browse the web, read/write files, git operations, send emails, manage calendars, install packages, control system settings, and save memories. You MUST call this tool whenever the user asks you to DO anything — play music, open something, check something, build something, send something. NEVER describe an action without calling this tool. If the user asks and you just talk without calling this — you failed.",
 						parameters: {
 							type: "object",
 							properties: {
 								query: {
 									type: "string",
-									description: "The user's request to pass to the gitclaw agent",
+									description: "What to do. Be specific. Include file paths for uploaded files. Examples: 'Play relaxing music on YouTube using: open https://youtube.com/...', 'Open Spotify and play chill playlist using osascript', 'Save to memory: user likes rock music'",
 								},
 							},
 							required: ["query"],
@@ -192,10 +225,16 @@ export class OpenAIRealtimeAdapter implements MultimodalAdapter {
 				console.log(dim("[voice] Session configured"));
 				break;
 
-			case "input_audio_buffer.speech_stopped":
-				// VAD detected end of speech — inject latest video frame before
-				// OpenAI auto-creates the response, so the model can "see" it.
+			case "input_audio_buffer.speech_started":
+				// VAD detected start of speech — inject video frame (what user is looking at)
+				// and cancel any in-progress response so the user can interrupt
+				this.interrupted = true;
 				this.injectVideoFrame();
+				this.sendRaw({ type: "response.cancel" });
+				this.emit({ type: "interrupt" });
+				break;
+
+			case "input_audio_buffer.speech_stopped":
 				break;
 
 			case "conversation.item.input_audio_transcription.completed":
@@ -205,8 +244,13 @@ export class OpenAIRealtimeAdapter implements MultimodalAdapter {
 				}
 				break;
 
+			case "response.created":
+				// New response starting — accept audio again
+				this.interrupted = false;
+				break;
+
 			case "response.audio.delta":
-				if (event.delta) {
+				if (event.delta && !this.interrupted) {
 					this.emit({ type: "audio_delta", audio: event.delta });
 				}
 				break;
@@ -225,10 +269,14 @@ export class OpenAIRealtimeAdapter implements MultimodalAdapter {
 				this.handleFunctionCall(event);
 				break;
 
-			case "error":
+			case "error": {
+				const errMsg = event.error?.message || "Unknown OpenAI error";
 				console.error(dim(`[voice] Error: ${JSON.stringify(event.error)}`));
-				this.emit({ type: "error", message: event.error?.message || "Unknown OpenAI error" });
+				// Don't surface cancellation errors — they happen when user interrupts with no active response
+				if (errMsg.toLowerCase().includes("cancellation failed")) break;
+				this.emit({ type: "error", message: errMsg });
 				break;
+			}
 		}
 	}
 

@@ -1,6 +1,6 @@
 {
   "name": "gitclaw",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "A universal git-native agent powered by pi-agent-core",
   "author": "shreyaskapale",
   "license": "MIT",
@@ -46,9 +46,11 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@googleworkspace/cli": "^0.8.1",
     "@mariozechner/pi-agent-core": "^0.55.4",
     "@mariozechner/pi-ai": "^0.55.4",
     "@sinclair/typebox": "^0.34.41",
+    "baileys": "^7.0.0-rc.9",
     "js-yaml": "^4.1.0",
     "ws": "^8.19.0"
   },

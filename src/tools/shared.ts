@@ -1,5 +1,6 @@
 import { Type } from "@sinclair/typebox";
 import { StringEnum } from "@mariozechner/pi-ai";
+import { homedir } from "os";
 
 // ── Constants ───────────────────────────────────────────────────────────
 
@@ -32,6 +33,29 @@ export const memorySchema = Type.Object({
 	action: StringEnum(["load", "save"], { description: "Whether to load or save memory" }),
 	content: Type.Optional(Type.String({ description: "Memory content to save (required for save)" })),
 	message: Type.Optional(Type.String({ description: "Commit message describing why this memory changed (required for save)" })),
+});
+
+export const taskTrackerSchema = Type.Object({
+	action: StringEnum(["begin", "update", "end", "list"], { description: "Action to perform" }),
+	objective: Type.Optional(Type.String({ description: "Task objective (required for begin)" })),
+	task_id: Type.Optional(Type.String({ description: "Task ID (required for update/end)" })),
+	step: Type.Optional(Type.String({ description: "Step description (for update)" })),
+	outcome: Type.Optional(StringEnum(["success", "failure", "partial"], { description: "Task outcome (for end)" })),
+	failure_reason: Type.Optional(Type.String({ description: "Why the task failed (for end+failure)" })),
+	skill_used: Type.Optional(Type.String({ description: "Name of skill used, if any (for end)" })),
+});
+
+export const capturePhotoSchema = Type.Object({
+	reason: Type.String({ description: "Why this moment is being captured (e.g. 'user celebrating project launch')" }),
+});
+
+export const skillLearnerSchema = Type.Object({
+	action: StringEnum(["evaluate", "crystallize", "status", "review", "update", "delete"], { description: "Action to perform" }),
+	task_id: Type.Optional(Type.String({ description: "Task ID (for evaluate/crystallize)" })),
+	skill_name: Type.Optional(Type.String({ description: "Skill name (for crystallize/update/delete)" })),
+	skill_description: Type.Optional(Type.String({ description: "Skill description (for crystallize)" })),
+	instructions: Type.Optional(Type.String({ description: "New instructions content (for update)" })),
+	override_heuristic: Type.Optional(Type.Boolean({ description: "Override skill-worthiness heuristic (for evaluate)" })),
 });
 
 // ── Shared helpers ──────────────────────────────────────────────────────
@@ -83,6 +107,9 @@ export function paginateLines(
 
 /** Resolve a path relative to a sandbox repo root. */
 export function resolveSandboxPath(path: string, repoRoot: string): string {
+	if (path.startsWith("~/") || path === "~") {
+		path = homedir() + path.slice(1);
+	}
 	if (path.startsWith("/")) return path;
 	return repoRoot.endsWith("/") ? repoRoot + path : repoRoot + "/" + path;
 }

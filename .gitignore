@@ -3,6 +3,13 @@ dist/
 pi-mono/
 .claude/
 .gitagent/
+.gitagent/whatsapp-auth/
 *.tgz
 snake-game.html
 examples/debug-events.ts
+.env
+cmd
+workspace/
+memory/.latest-frame.jpg
+memory/.latest-screen.jpg
+.DS_Store
