@@ -20,12 +20,12 @@ if [[ "${COLORTERM:-}" =~ ^(truecolor|24bit)$ ]]; then
   GRAY=$'\e[38;2;160;160;160m'
   LGRAY=$'\e[38;2;110;110;110m'
 else
-  EMPTY=$'\e[48;5;233m'
-  OUTLINE=$'\e[48;5;52m'
-  FILL=$'\e[48;5;204m'
-  RED=$'\e[38;5;204m'
-  GRAY=$'\e[38;5;248m'
-  LGRAY=$'\e[38;5;242m'
+  EMPTY=$'\e[40m'
+  OUTLINE=$'\e[40m'
+  FILL=$'\e[101m'
+  RED=$'\e[91m'
+  GRAY=$'\e[37m'
+  LGRAY=$'\e[90m'
 fi
 
 # ── Sprite Banner ────────────────────────────────────────────────
