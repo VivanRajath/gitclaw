@@ -101,8 +101,7 @@ echo ""
 
 # ── Install gitclaw globally ─────────────────────────────────────
 if command -v gitclaw &>/dev/null; then
-  CURRENT_VER=$(gitclaw --version 2>/dev/null || echo "unknown")
-  echo -e "  ${GREEN}✓${NC} gitclaw already installed (${CURRENT_VER})"
+  echo -e "  ${GREEN}✓${NC} gitclaw already installed"
 else
   echo -e "  ${BOLD}Installing gitclaw...${NC}"
   # Remove corrupted partial installs that cause ENOTDIR
