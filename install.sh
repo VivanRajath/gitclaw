@@ -404,4 +404,4 @@ echo ""
 
 (sleep 2 && open_browser) &
 
-exec gitclaw --dir "$PROJECT_DIR" --model "$MODEL" --voice "$ADAPTER" --port "$PORT"
+exec gitclaw --model "$MODEL" --voice --dir "$PROJECT_DIR"
