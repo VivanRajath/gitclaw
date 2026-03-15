@@ -45,7 +45,7 @@ rows=(
 text=(
   ""
   ""
-  "${RED}${BOLD}GitClaw v0.4.0${RESET}"
+  "${RED}${BOLD}GitClaw v1.1.0${RESET}"
   "${GRAY}A universal git-native multimodal always learning AI Agent${RESET}"
   "${GRAY}(TinyHuman)${RESET}"
   ""
@@ -113,6 +113,37 @@ else
   echo -e "  ${GREEN}✓${NC} gitclaw installed"
 fi
 echo ""
+
+# ── Auto-resume existing setup ──────────────────────────────────
+PROJECT_DIR="${HOME}/assistant"
+if [ -d "$PROJECT_DIR" ] && [ -f "$PROJECT_DIR/agent.yaml" ]; then
+  echo -e "  ${GREEN}✓${NC} Found existing assistant at ${DIM}${PROJECT_DIR}${NC}"
+
+  # Re-export .env keys into current shell
+  if [ -f "$PROJECT_DIR/.env" ]; then
+    set -a
+    source "$PROJECT_DIR/.env"
+    set +a
+    echo -e "  ${GREEN}✓${NC} Loaded keys from ${DIM}${PROJECT_DIR}/.env${NC}"
+  fi
+
+  # Extract model from agent.yaml (look for preferred: "..." under model:)
+  MODEL=$(grep -A1 '^model:' "$PROJECT_DIR/agent.yaml" | grep 'preferred:' | sed 's/.*preferred:[[:space:]]*["'"'"']\?\([^"'"'"']*\)["'"'"']\?.*/\1/' | head -1)
+  MODEL="${MODEL:-anthropic:claude-sonnet-4-6}"
+
+  # Determine adapter from available keys
+  if [ -n "${GEMINI_API_KEY:-}" ] && [ -z "${OPENAI_API_KEY:-}" ]; then
+    ADAPTER_LABEL="Gemini Live"
+  else
+    ADAPTER_LABEL="OpenAI Realtime"
+  fi
+
+  PORT="${PORT:-3333}"
+
+  echo -e "  ${DIM}Resuming with: ${MODEL} on port ${PORT}${NC}"
+  echo ""
+
+else
 
 # ── Setup Mode Selection ─────────────────────────────────────────
 echo -e "  ${BOLD}How would you like to set up?${NC}"
@@ -307,6 +338,8 @@ else
   echo ""
 
 fi
+
+fi  # end auto-resume / interactive setup
 
 # ═══════════════════════════════════════════════════════════════════
 # LAUNCH SUMMARY

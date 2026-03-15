@@ -219,6 +219,27 @@
   .conv-msg.tool-result { color: #7ee787; font-size: 11px; }
   .conv-msg.tool-result.error { color: #f85149; }
   .conv-msg.tool-result .label { font-weight: 600; }
+  .conv-msg.schedule-header {
+    background: rgba(88,166,255,0.06);
+    border-left: 3px solid #58a6ff;
+    padding: 8px 12px;
+    margin: 8px 0 2px 0;
+    border-radius: 0 6px 6px 0;
+    font-size: 12px;
+    color: #58a6ff;
+  }
+  .conv-msg.schedule-header .schedule-label { font-weight: 600; }
+  .conv-msg.schedule-header .schedule-prompt-preview { color: #8b949e; margin-left: 8px; font-style: italic; }
+  .conv-msg.schedule-done {
+    background: rgba(63,185,80,0.06);
+    border-left: 3px solid #3fb950;
+    padding: 6px 12px;
+    margin: 2px 0 8px 0;
+    border-radius: 0 6px 6px 0;
+    font-size: 12px;
+    color: #8b949e;
+  }
+  .conv-msg.schedule-done.error { border-left-color: #f85149; }
   .tool-activity { margin-bottom: 3px; overflow: hidden; height: 32px; display: flex; align-items: center; gap: 8px; }
   .tool-activity .tool-sprite {
     flex-shrink: 0; width: 24px; height: 24px;
@@ -832,6 +853,42 @@
   }
   .flows-saved-item .flow-delete:hover { opacity: 1; }
 
+  /* Scheduler view */
+  .scheduler-view { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+  .scheduler-view.hidden { display: none; }
+  .scheduler-content { flex: 1; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 16px; }
+  .scheduler-form { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .scheduler-form label { font-size: 11px; color: #8b949e; margin-bottom: 2px; display: block; }
+  .scheduler-form input, .scheduler-form textarea, .scheduler-form select {
+    width: 100%; padding: 8px 10px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+    color: #c9d1d9; font-size: 13px; outline: none; box-sizing: border-box; font-family: inherit;
+  }
+  .scheduler-form input:focus, .scheduler-form textarea:focus { border-color: #58a6ff; }
+  .scheduler-form textarea { resize: vertical; min-height: 60px; }
+  .schedule-card { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 16px; }
+  .schedule-card.disabled { opacity: 0.5; }
+  .schedule-card-header { display: flex; justify-content: space-between; align-items: center; }
+  .schedule-card-id { font-weight: 600; color: #e6edf3; font-size: 14px; }
+  .schedule-cron { background: rgba(88,166,255,0.1); color: #58a6ff; padding: 2px 8px; border-radius: 4px; font-family: monospace; font-size: 11px; }
+  .schedule-prompt { color: #c9d1d9; font-size: 13px; margin: 8px 0; white-space: pre-wrap; word-break: break-word; max-height: 60px; overflow: hidden; }
+  .schedule-meta { font-size: 11px; color: #8b949e; display: flex; gap: 12px; align-items: center; }
+  .schedule-meta .status-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; margin-right: 4px; }
+  .schedule-meta .status-dot.success { background: #3fb950; }
+  .schedule-meta .status-dot.error { background: #f85149; }
+  .schedule-actions { display: flex; gap: 6px; margin-top: 8px; }
+  .schedule-actions button {
+    padding: 4px 10px; border-radius: 4px; border: 1px solid #30363d; background: #21262d;
+    color: #c9d1d9; font-size: 11px; cursor: pointer;
+  }
+  .schedule-actions button:hover { border-color: #58a6ff; color: #58a6ff; }
+  .schedule-actions button.danger:hover { border-color: #f85149; color: #f85149; }
+  .schedule-toggle { position: relative; width: 36px; height: 20px; cursor: pointer; }
+  .schedule-toggle input { display: none; }
+  .schedule-toggle .slider { position: absolute; inset: 0; background: #30363d; border-radius: 10px; transition: 0.2s; }
+  .schedule-toggle .slider::before { content: ''; position: absolute; width: 14px; height: 14px; left: 3px; bottom: 3px; background: #8b949e; border-radius: 50%; transition: 0.2s; }
+  .schedule-toggle input:checked + .slider { background: #238636; }
+  .schedule-toggle input:checked + .slider::before { transform: translateX(16px); background: #fff; }
+
   /* Communication view */
   .comms-view { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
   .comms-view.hidden { display: none; }
@@ -950,6 +1007,7 @@
       <button class="view-tab" id="tabIntegrations" onclick="switchView('integrations')">Integrations</button>
       <button class="view-tab" id="tabComms" onclick="switchView('comms')">Communication</button>
       <button class="view-tab" id="tabFlows" onclick="switchView('flows')">SkillFlows</button>
+      <button class="view-tab" id="tabScheduler" onclick="switchView('scheduler')">Scheduler</button>
     </div>
   </div>
   <div class="header-right">
@@ -1243,6 +1301,55 @@
       </div>
     </div>
   </div>
+  <div class="scheduler-view hidden" id="schedulerView">
+    <div class="scheduler-content">
+      <div class="scheduler-form">
+        <div style="display:flex;gap:12px;">
+          <div style="flex:1;">
+            <label>Job ID (kebab-case)</label>
+            <input id="scheduleId" type="text" placeholder="daily-standup">
+          </div>
+          <div style="flex:1;">
+            <label>Mode</label>
+            <div style="display:flex;gap:6px;">
+              <button id="scheduleModeRepeat" onclick="setScheduleMode('repeat')" class="schedule-mode-btn active" style="flex:1;padding:8px;background:#238636;border:1px solid #2ea043;border-radius:6px;color:#fff;cursor:pointer;font-size:12px;">Repeat</button>
+              <button id="scheduleModeOnce" onclick="setScheduleMode('once')" class="schedule-mode-btn" style="flex:1;padding:8px;background:#21262d;border:1px solid #30363d;border-radius:6px;color:#8b949e;cursor:pointer;font-size:12px;">Run Once</button>
+            </div>
+          </div>
+        </div>
+        <div id="scheduleCronRow">
+          <label>Cron Expression</label>
+          <div style="display:flex;gap:6px;">
+            <input id="scheduleCron" type="text" placeholder="0 9 * * 1-5" style="flex:1;">
+            <select id="scheduleCronPreset" onchange="applySchedulePreset()" style="width:auto;min-width:120px;">
+              <option value="">Presets...</option>
+              <option value="0 9 * * *">Daily 9am</option>
+              <option value="0 9 * * 1-5">Weekdays 9am</option>
+              <option value="0 */6 * * *">Every 6 hours</option>
+              <option value="*/30 * * * *">Every 30 min</option>
+              <option value="0 9 * * 1">Weekly Monday</option>
+              <option value="*/1 * * * *">Every minute (test)</option>
+            </select>
+          </div>
+          <div style="font-size:10px;color:#484f58;margin-top:4px;">Standard 5-field cron: min hour day month weekday</div>
+        </div>
+        <div id="scheduleRunAtRow" style="display:none;">
+          <label>Run At (date &amp; time)</label>
+          <input id="scheduleRunAt" type="datetime-local" style="max-width:280px;">
+          <div style="font-size:10px;color:#484f58;margin-top:4px;">Job will run once at this time and then auto-disable</div>
+        </div>
+        <div>
+          <label>Prompt</label>
+          <textarea id="schedulePrompt" rows="3" placeholder="Summarize git commits from the last 24 hours"></textarea>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button onclick="saveScheduleJob()" style="padding:8px 16px;background:#238636;border:1px solid #2ea043;border-radius:6px;color:#fff;cursor:pointer;font-size:13px;">Save Schedule</button>
+          <button onclick="clearScheduleForm()" style="padding:8px 16px;background:#21262d;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;cursor:pointer;font-size:13px;">Clear</button>
+        </div>
+      </div>
+      <div id="schedulesList"></div>
+    </div>
+  </div>
   <div class="skills-view hidden" id="skillsView" style="display:flex;flex-direction:column;flex:1;overflow:hidden;">
     <iframe id="skillsFrame" src="" style="flex:1;border:none;background:#0d1117;width:100%;"></iframe>
   </div>
@@ -1253,7 +1360,7 @@
 <script>
 var hasComposio={{HAS_COMPOSIO}};
 if(!hasComposio){document.getElementById('tabIntegrations').style.display='none';}
-let currentView='chat',filesLoaded=false,integrationsLoaded=false,commsLoaded=false,skillsLoaded=false,flowsLoaded=false;
+let currentView='chat',filesLoaded=false,integrationsLoaded=false,commsLoaded=false,skillsLoaded=false,flowsLoaded=false,schedulerLoaded=false;
 function switchView(v){
   currentView=v;
   document.getElementById('chatView').classList.toggle('hidden',v!=='chat');
@@ -1261,15 +1368,18 @@ function switchView(v){
   document.getElementById('commsView').classList.toggle('hidden',v!=='comms');
   document.getElementById('skillsView').classList.toggle('hidden',v!=='skills');
   document.getElementById('flowsView').classList.toggle('hidden',v!=='flows');
+  document.getElementById('schedulerView').classList.toggle('hidden',v!=='scheduler');
   document.getElementById('tabChat').classList.toggle('active',v==='chat');
   document.getElementById('tabIntegrations').classList.toggle('active',v==='integrations');
   document.getElementById('tabComms').classList.toggle('active',v==='comms');
   document.getElementById('tabSkills').classList.toggle('active',v==='skills');
   document.getElementById('tabFlows').classList.toggle('active',v==='flows');
+  document.getElementById('tabScheduler').classList.toggle('active',v==='scheduler');
   if(v==='integrations'&&!integrationsLoaded){loadToolkits();integrationsLoaded=true;}
   if(v==='comms'&&!commsLoaded){loadTelegramStatus();loadWhatsAppStatus();loadPhoneWebhookUrl();commsLoaded=true;}
   if(v==='skills'&&!skillsLoaded){document.getElementById('skillsFrame').src='/api/skills-mp/proxy?path=/';skillsLoaded=true;}
   if(v==='flows'&&!flowsLoaded){loadFlowSkills();loadSavedFlows();flowsLoaded=true;}
+  if(v==='scheduler'&&!schedulerLoaded){loadSchedules();schedulerLoaded=true;}
 }
 // Skills MP install handler
 window.addEventListener('message',function(e){
@@ -1855,6 +1965,22 @@ function handleServerMessage(m){switch(m.type){
     break;
   case'files_changed':refreshFileTree();break;
   case'error':appendConv('Error: '+escHtml(m.message),'system');break;
+  case'schedule_start':
+    var schEl=document.createElement('div');
+    schEl.className='conv-msg schedule-header';
+    schEl.innerHTML='<span class="schedule-label">\u25b6 Ran schedule "'+escHtml(m.id)+'"</span>'
+      +'<span class="schedule-prompt-preview">'+escHtml((m.prompt||'').slice(0,80))+'</span>';
+    conv.appendChild(schEl);
+    conv.scrollTop=conv.scrollHeight;
+    break;
+  case'schedule_result':
+    var sdEl=document.createElement('div');
+    sdEl.className='conv-msg schedule-done'+(m.success?'':' error');
+    sdEl.textContent=(m.success?'\u2713':'\u2717')+' Schedule "'+m.id+'" completed'+(m.success?'':' with error');
+    conv.appendChild(sdEl);
+    conv.scrollTop=conv.scrollHeight;
+    if(currentView==='scheduler')loadSchedules();
+    break;
 }}
 function escHtml(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;}
 
@@ -2351,6 +2477,174 @@ window.addEventListener('message',function(e){
 });
 // Also refresh when window regains focus (in case popup completed)
 window.addEventListener('focus',function(){if(currentView==='integrations'&&integrationsLoaded)loadToolkits();});
+
+// ── SCHEDULER ──────────────────────────────────────────────────────
+var _schedules=[],_scheduleMode='repeat';
+function cronToHuman(expr){
+  var map={'0 9 * * *':'Daily at 9:00 AM','0 9 * * 1-5':'Weekdays at 9:00 AM','0 */6 * * *':'Every 6 hours',
+    '*/30 * * * *':'Every 30 minutes','0 9 * * 1':'Weekly on Monday at 9:00 AM','*/1 * * * *':'Every minute'};
+  return map[expr]||expr;
+}
+function setScheduleMode(mode){
+  _scheduleMode=mode;
+  var rBtn=document.getElementById('scheduleModeRepeat'),oBtn=document.getElementById('scheduleModeOnce');
+  var cronRow=document.getElementById('scheduleCronRow'),runAtRow=document.getElementById('scheduleRunAtRow');
+  if(mode==='once'){
+    oBtn.style.background='#238636';oBtn.style.borderColor='#2ea043';oBtn.style.color='#fff';
+    rBtn.style.background='#21262d';rBtn.style.borderColor='#30363d';rBtn.style.color='#8b949e';
+    cronRow.style.display='none';runAtRow.style.display='';
+  }else{
+    rBtn.style.background='#238636';rBtn.style.borderColor='#2ea043';rBtn.style.color='#fff';
+    oBtn.style.background='#21262d';oBtn.style.borderColor='#30363d';oBtn.style.color='#8b949e';
+    cronRow.style.display='';runAtRow.style.display='none';
+  }
+}
+async function loadSchedules(){
+  try{
+    var r=await fetch('/api/schedules/list');var d=await r.json();
+    _schedules=d.schedules||[];
+    renderScheduleCards();
+  }catch(e){console.error('Failed to load schedules',e);}
+}
+function renderScheduleCards(){
+  var el=document.getElementById('schedulesList');
+  if(!_schedules.length){el.innerHTML='<div style="color:#484f58;font-size:13px;text-align:center;padding:20px;">No scheduled jobs yet. Create one above.</div>';return;}
+  el.innerHTML=_schedules.map(function(s){
+    var statusDot=s.lastResult?'<span class="status-dot '+(s.lastResult==='success'?'success':'error')+'"></span>'+s.lastResult:'';
+    var lastRun=s.lastRunAt?new Date(s.lastRunAt).toLocaleString():'Never';
+    var isOnce=s.mode==='once';
+    var timingBadge=isOnce&&s.runAt
+      ?'<span class="schedule-cron" title="Run once at '+new Date(s.runAt).toLocaleString()+'">'+new Date(s.runAt).toLocaleString()+'</span>'
+      :'<span class="schedule-cron" title="'+cronToHuman(s.cron)+'">'+s.cron+'</span>';
+    var modeBadge=isOnce?'<span style="background:rgba(210,153,34,0.15);color:#d29922;padding:2px 6px;border-radius:4px;font-size:10px;margin-left:6px;">once</span>'
+      :'<span style="background:rgba(63,185,80,0.15);color:#3fb950;padding:2px 6px;border-radius:4px;font-size:10px;margin-left:6px;">repeat</span>';
+    var timingDesc=isOnce&&s.runAt?'Runs once at '+new Date(s.runAt).toLocaleString():cronToHuman(s.cron);
+    return '<div class="schedule-card'+(s.enabled?'':' disabled')+'" data-id="'+s.id+'">'
+      +'<div class="schedule-card-header">'
+        +'<span class="schedule-card-id">'+s.id+modeBadge+'</span>'
+        +'<div style="display:flex;align-items:center;gap:8px;">'
+          +timingBadge
+          +'<label class="schedule-toggle"><input type="checkbox" '+(s.enabled?'checked':'')+' onchange="toggleScheduleJob(\''+s.id+'\',this.checked)"><span class="slider"></span></label>'
+        +'</div>'
+      +'</div>'
+      +'<div class="schedule-prompt">'+s.prompt.replace(/</g,'&lt;')+'</div>'
+      +'<div class="schedule-meta">'
+        +'<span>'+timingDesc+'</span>'
+        +'<span>Last run: '+lastRun+'</span>'
+        +'<span>'+statusDot+'</span>'
+      +'</div>'
+      +'<div class="schedule-actions">'
+        +'<button onclick="editScheduleJob(\''+s.id+'\')">Edit</button>'
+        +'<button onclick="runScheduleNow(\''+s.id+'\')">Run Now</button>'
+        +(isOnce&&!s.enabled&&s.lastRunAt?'<button onclick="resetScheduleJob(\''+s.id+'\')" style="border-color:#d29922;color:#d29922;">Reset</button>':'')
+        +'<button class="danger" onclick="deleteScheduleJob(\''+s.id+'\')">Delete</button>'
+      +'</div>'
+    +'</div>';
+  }).join('');
+}
+async function saveScheduleJob(){
+  var id=document.getElementById('scheduleId').value.trim();
+  var prompt=document.getElementById('schedulePrompt').value.trim();
+  if(!id||!prompt){alert('Please fill in Job ID and Prompt.');return;}
+  var payload={id:id,prompt:prompt,mode:_scheduleMode,enabled:true};
+  if(_scheduleMode==='once'){
+    var runAt=document.getElementById('scheduleRunAt').value;
+    if(runAt){
+      payload.runAt=new Date(runAt).toISOString();
+    }else{
+      var cronExpr=document.getElementById('scheduleCron').value.trim();
+      if(!cronExpr){alert('Please set a Run At time or switch to Repeat mode.');return;}
+      payload.cron=cronExpr;
+    }
+  }else{
+    var cronExpr=document.getElementById('scheduleCron').value.trim();
+    if(!cronExpr){alert('Please enter a cron expression.');return;}
+    payload.cron=cronExpr;
+  }
+  try{
+    var r=await fetch('/api/schedules/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    var d=await r.json();
+    if(!r.ok){alert(d.error||'Failed to save');return;}
+    clearScheduleForm();loadSchedules();
+  }catch(e){alert('Error: '+e.message);}
+}
+function clearScheduleForm(){
+  document.getElementById('scheduleId').value='';
+  document.getElementById('scheduleCron').value='';
+  document.getElementById('schedulePrompt').value='';
+  document.getElementById('scheduleRunAt').value='';
+  document.getElementById('scheduleCronPreset').selectedIndex=0;
+  setScheduleMode('repeat');
+}
+function applySchedulePreset(){
+  var val=document.getElementById('scheduleCronPreset').value;
+  if(val)document.getElementById('scheduleCron').value=val;
+}
+async function toggleScheduleJob(id,enabled){
+  try{
+    await fetch('/api/schedules/toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id,enabled:enabled})});
+    loadSchedules();
+  }catch(e){console.error(e);}
+}
+async function deleteScheduleJob(id){
+  if(!confirm('Delete schedule "'+id+'"?'))return;
+  try{
+    await fetch('/api/schedules/delete',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})});
+    loadSchedules();
+  }catch(e){alert('Error: '+e.message);}
+}
+async function runScheduleNow(id){
+  try{
+    var r=await fetch('/api/schedules/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})});
+    var d=await r.json();
+    if(r.ok){
+      // Find the card and show running indicator
+      var card=document.querySelector('.schedule-card[data-id="'+id+'"]');
+      if(card){var meta=card.querySelector('.schedule-meta');if(meta)meta.innerHTML='<span style="color:#58a6ff;">Running...</span>';}
+    }else{alert(d.error||'Failed to trigger');}
+  }catch(e){alert('Error: '+e.message);}
+}
+function editScheduleJob(id){
+  var s=_schedules.find(function(x){return x.id===id;});
+  if(!s)return;
+  document.getElementById('scheduleId').value=s.id;
+  document.getElementById('scheduleCron').value=s.cron||'';
+  document.getElementById('schedulePrompt').value=s.prompt;
+  setScheduleMode(s.mode||'repeat');
+  if(s.runAt){
+    var d=new Date(s.runAt);
+    var local=new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,16);
+    document.getElementById('scheduleRunAt').value=local;
+  }else{
+    document.getElementById('scheduleRunAt').value='';
+  }
+  document.getElementById('schedulerView').querySelector('.scheduler-content').scrollTop=0;
+}
+async function resetScheduleJob(id){
+  var s=_schedules.find(function(x){return x.id===id;});
+  if(!s)return;
+  if(s.runAt){
+    // For runAt schedules, prompt for a new time
+    var newTime=prompt('Enter new run time (YYYY-MM-DD HH:MM) or leave empty to re-use '+new Date(s.runAt).toLocaleString()+':');
+    var runAt=s.runAt;
+    if(newTime&&newTime.trim()){
+      var parsed=new Date(newTime.trim());
+      if(isNaN(parsed.getTime())){alert('Invalid date format.');return;}
+      runAt=parsed.toISOString();
+    }
+    try{
+      var r=await fetch('/api/schedules/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:s.id,prompt:s.prompt,mode:'once',runAt:runAt,enabled:true})});
+      var d=await r.json();if(!r.ok){alert(d.error||'Failed to reset');return;}
+      loadSchedules();
+    }catch(e){alert('Error: '+e.message);}
+  }else{
+    // For cron-based once schedules, just re-enable
+    try{
+      await fetch('/api/schedules/toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id,enabled:true})});
+      loadSchedules();
+    }catch(e){alert('Error: '+e.message);}
+  }
+}
 
 // ── TELEGRAM / COMMUNICATION ────────────────────────────────────────
 async function loadTelegramStatus(){

@@ -15,6 +15,9 @@ import { appendMessage, loadHistory, deleteHistory, summarizeHistory } from "./c
 import { getVoiceContext, getAgentContext } from "../context.js";
 import { discoverSkills } from "../skills.js";
 import { discoverWorkflows, loadFlowDefinition, saveFlowDefinition, deleteFlowDefinition } from "../workflows.js";
+import { discoverSchedules, saveSchedule, deleteSchedule, updateScheduleMeta } from "../schedules.js";
+import { startScheduler, stopScheduler, reloadSchedules, executeScheduledJob } from "../schedule-runner.js";
+import cron from "node-cron";
 
 const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
 const bold = (s: string) => `\x1b[1m${s}\x1b[0m`;
@@ -651,6 +654,21 @@ ${runningContext}`;
 			if (client.readyState === 1) client.send(payload);
 		}
 	}
+
+	// ── Scheduler setup ────────────────────────────────────────────────
+	const scheduleSendToBrowser = (msg: ServerMessage) => {
+		broadcastToBrowsers(msg);
+		appendMessage(opts.agentDir, activeBranch, msg);
+	};
+	const headlessHandler = createToolHandler(scheduleSendToBrowser);
+	const schedulerOpts = {
+		agentDir: agentRoot,
+		model: opts.model,
+		env: opts.env,
+		runPrompt: headlessHandler,
+		broadcastToBrowsers,
+		appendToHistory: (msg: any) => appendMessage(opts.agentDir, activeBranch, msg),
+	};
 
 	async function downloadTelegramFile(fileId: string, agentDir: string): Promise<{ path: string; name: string } | null> {
 		try {
@@ -2044,6 +2062,100 @@ ${runningContext}`;
 				jsonReply(res, 500, { error: err.message });
 			}
 
+		// ── Scheduler API ──────────────────────────────────────────────
+		} else if (url.pathname === "/api/schedules/list" && req.method === "GET") {
+			try {
+				const schedules = await discoverSchedules(agentRoot);
+				jsonReply(res, 200, { schedules });
+			} catch (err: any) {
+				jsonReply(res, 500, { error: err.message });
+			}
+
+		} else if (url.pathname === "/api/schedules/save" && req.method === "POST") {
+			const body = await readBody(req);
+			let parsed: { id: string; prompt: string; cron?: string; mode?: string; runAt?: string; enabled?: boolean };
+			try { parsed = JSON.parse(body); } catch { return jsonReply(res, 400, { error: "Invalid JSON" }); }
+			if (!parsed.id || !parsed.prompt) return jsonReply(res, 400, { error: "Missing id or prompt" });
+			const mode = parsed.mode === "once" ? "once" as const : "repeat" as const;
+			if (mode === "once" && parsed.runAt) {
+				// runAt mode — validate the datetime is in the future
+				const runAtDate = new Date(parsed.runAt);
+				if (isNaN(runAtDate.getTime())) return jsonReply(res, 400, { error: "Invalid runAt datetime" });
+			} else {
+				// cron mode — validate expression
+				if (!parsed.cron) return jsonReply(res, 400, { error: "Missing cron expression" });
+				if (!cron.validate(parsed.cron)) return jsonReply(res, 400, { error: "Invalid cron expression" });
+			}
+			try {
+				await saveSchedule(agentRoot, {
+					id: parsed.id,
+					prompt: parsed.prompt,
+					cron: parsed.cron || "",
+					mode,
+					...(parsed.runAt ? { runAt: parsed.runAt } : {}),
+					enabled: parsed.enabled !== false,
+					createdAt: new Date().toISOString(),
+				});
+				await reloadSchedules(schedulerOpts);
+				jsonReply(res, 200, { ok: true });
+			} catch (err: any) {
+				jsonReply(res, 400, { error: err.message });
+			}
+
+		} else if (url.pathname === "/api/schedules/delete" && req.method === "DELETE") {
+			const body = await readBody(req);
+			let parsed: { id: string };
+			try { parsed = JSON.parse(body); } catch { return jsonReply(res, 400, { error: "Invalid JSON" }); }
+			if (!parsed.id) return jsonReply(res, 400, { error: "Missing id" });
+			try {
+				await deleteSchedule(agentRoot, parsed.id);
+				await reloadSchedules(schedulerOpts);
+				jsonReply(res, 200, { ok: true });
+			} catch (err: any) {
+				jsonReply(res, 500, { error: err.message });
+			}
+
+		} else if (url.pathname === "/api/schedules/toggle" && req.method === "POST") {
+			const body = await readBody(req);
+			let parsed: { id: string; enabled: boolean };
+			try { parsed = JSON.parse(body); } catch { return jsonReply(res, 400, { error: "Invalid JSON" }); }
+			if (!parsed.id) return jsonReply(res, 400, { error: "Missing id" });
+			try {
+				await updateScheduleMeta(agentRoot, parsed.id, { enabled: parsed.enabled });
+				await reloadSchedules(schedulerOpts);
+				jsonReply(res, 200, { ok: true });
+			} catch (err: any) {
+				jsonReply(res, 500, { error: err.message });
+			}
+
+		} else if (url.pathname === "/api/schedules/run" && req.method === "POST") {
+			const body = await readBody(req);
+			let parsed: { id: string };
+			try { parsed = JSON.parse(body); } catch { return jsonReply(res, 400, { error: "Invalid JSON" }); }
+			if (!parsed.id) return jsonReply(res, 400, { error: "Missing id" });
+			try {
+				const schedules = await discoverSchedules(agentRoot);
+				const schedule = schedules.find((s) => s.id === parsed.id);
+				if (!schedule) return jsonReply(res, 404, { error: "Schedule not found" });
+				jsonReply(res, 200, { ok: true, message: "Job triggered" });
+				executeScheduledJob(schedule, schedulerOpts);
+			} catch (err: any) {
+				jsonReply(res, 500, { error: err.message });
+			}
+
+		} else if (url.pathname === "/api/schedules/logs" && req.method === "GET") {
+			const id = url.searchParams.get("id");
+			if (!id) return jsonReply(res, 400, { error: "Missing id param" });
+			try {
+				const logFile = join(agentRoot, ".gitagent", "schedule-logs", `${id}.jsonl`);
+				const raw = readFileSync(logFile, "utf-8");
+				const lines = raw.trim().split("\n").filter(Boolean);
+				const entries = lines.slice(-50).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+				jsonReply(res, 200, { entries });
+			} catch {
+				jsonReply(res, 200, { entries: [] });
+			}
+
 		// ── Skills Marketplace proxy ────────────────────────────────────
 		} else if (url.pathname === "/api/skills-mp/proxy" && req.method === "GET") {
 			const proxyPath = url.searchParams.get("path") || "/";
@@ -2522,7 +2634,12 @@ a{color:#58a6ff;}</style></head>
 	console.log(dim(`[voice] Backend: ${opts.adapter}`));
 	console.log(dim(`[voice] Open http://localhost:${port} in your browser`));
 
+	// Start the cron scheduler
+	startScheduler(schedulerOpts).catch((err) => console.error(dim(`[scheduler] Init error: ${err.message}`)));
+
 	return async () => {
+		// Stop scheduled jobs
+		stopScheduler();
 		// Stop Telegram polling
 		stopTelegramPolling();
 		// Gracefully close WebSocket connections to trigger close handlers (journal, mood, etc.)
