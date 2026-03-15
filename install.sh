@@ -187,12 +187,13 @@ if [ "$SETUP_MODE" = "1" ]; then
   ADAPTER="openai"
   ADAPTER_LABEL="OpenAI Realtime"
   MODEL="anthropic:claude-sonnet-4-6"
-  PROJECT_DIR="$(pwd)"
+  PROJECT_DIR="${HOME}/assistant"
 
-  # Init git if needed
+  # Create project dir and init git if needed
+  mkdir -p "$PROJECT_DIR"
   if [ ! -d "$PROJECT_DIR/.git" ]; then
     git init -q "$PROJECT_DIR"
-    echo -e "  ${GREEN}✓${NC} Initialized git repo"
+    echo -e "  ${GREEN}✓${NC} Initialized ~/assistant"
   fi
 
   echo ""
