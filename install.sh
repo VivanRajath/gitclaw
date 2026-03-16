@@ -45,7 +45,7 @@ rows=(
 text=(
   ""
   ""
-  "${RED}${BOLD}GitClaw v1.1.0${RESET}"
+  "${RED}${BOLD}GitClaw v1.1.1${RESET}"
   "${GRAY}A universal git-native multimodal always learning AI Agent${RESET}"
   "${GRAY}(TinyHuman)${RESET}"
   ""
@@ -99,9 +99,25 @@ fi
 echo -e "  ${GREEN}✓${NC} node $(node -v)  ${GREEN}✓${NC} npm $(npm -v)  ${GREEN}✓${NC} git $(git --version | cut -d' ' -f3)"
 echo ""
 
-# ── Install gitclaw globally ─────────────────────────────────────
+# ── Install / update gitclaw globally ────────────────────────────
 if command -v gitclaw &>/dev/null; then
-  echo -e "  ${GREEN}✓${NC} gitclaw already installed"
+  INSTALLED_VER="$(npm ls -g gitclaw --depth=0 --json 2>/dev/null | node -pe "JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')).dependencies?.gitclaw?.version || ''" 2>/dev/null || echo "")"
+  LATEST_VER="$(npm view gitclaw version 2>/dev/null || echo "")"
+
+  if [ -n "$INSTALLED_VER" ] && [ -n "$LATEST_VER" ] && [ "$INSTALLED_VER" != "$LATEST_VER" ]; then
+    echo -e "  ${YELLOW}⬆${NC}  gitclaw ${DIM}v${INSTALLED_VER}${NC} installed — ${GREEN}v${LATEST_VER}${NC} available"
+    read -rp "  Update to v${LATEST_VER}? [Y/n]: " UPDATE_CHOICE
+    UPDATE_CHOICE="${UPDATE_CHOICE:-Y}"
+    if [[ "$UPDATE_CHOICE" =~ ^[Yy] ]]; then
+      echo -e "  ${BOLD}Updating gitclaw...${NC}"
+      npm install -g gitclaw@latest 2>&1 | tail -2
+      echo -e "  ${GREEN}✓${NC} gitclaw updated to v${LATEST_VER}"
+    else
+      echo -e "  ${DIM}  keeping v${INSTALLED_VER}${NC}"
+    fi
+  else
+    echo -e "  ${GREEN}✓${NC} gitclaw v${INSTALLED_VER:-latest} ${DIM}(up to date)${NC}"
+  fi
 else
   echo -e "  ${BOLD}Installing gitclaw...${NC}"
   # Remove corrupted partial installs that cause ENOTDIR
