@@ -1,7 +1,7 @@
 {
   "name": "gitclaw",
-  "version": "0.3.1",
-  "description": "A universal git-native agent powered by pi-agent-core",
+  "version": "1.1.0",
+  "description": "A universal git-native multimodal always learning AI Agent (TinyHuman)",
   "author": "shreyaskapale",
   "license": "MIT",
   "repository": {
@@ -37,7 +37,7 @@
     }
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && cp src/voice/ui.html dist/voice/",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
     "test": "node --test test/*.test.ts --experimental-strip-types"
@@ -46,10 +46,13 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@googleworkspace/cli": "^0.8.1",
     "@mariozechner/pi-agent-core": "^0.55.4",
     "@mariozechner/pi-ai": "^0.55.4",
     "@sinclair/typebox": "^0.34.41",
+    "baileys": "^7.0.0-rc.9",
     "js-yaml": "^4.1.0",
+    "node-cron": "^3.0.3",
     "ws": "^8.19.0"
   },
   "peerDependencies": {
@@ -63,6 +66,7 @@
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.0.0",
+    "@types/node-cron": "^3.0.11",
     "@types/ws": "^8.18.1",
     "typescript": "^5.7.0"
   }

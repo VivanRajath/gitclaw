@@ -11,4 +11,4 @@ tools:
   - write
   - memory
 runtime:
-  max_turns: 50
+  max_turns: 56

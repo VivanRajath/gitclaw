@@ -7,6 +7,10 @@ export interface SkillMetadata {
 	description: string;
 	directory: string;
 	filePath: string;
+	confidence?: number;
+	usage_count?: number;
+	success_count?: number;
+	failure_count?: number;
 }
 
 export interface ParsedSkill extends SkillMetadata {
@@ -45,9 +49,13 @@ export async function discoverSkills(agentDir: string): Promise<SkillMetadata[]>
 	const skills: SkillMetadata[] = [];
 
 	for (const entry of entries) {
-		if (!entry.isDirectory()) continue;
+		// Accept both real directories and symlinks pointing to directories
+		if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
 
 		const skillDir = join(skillsDir, entry.name);
+
+		// For symlinks, verify the target is actually a directory
+		if (entry.isSymbolicLink() && !(await dirExists(skillDir))) continue;
 		const skillFile = join(skillDir, "SKILL.md");
 
 		let content: string;
@@ -76,12 +84,20 @@ export async function discoverSkills(agentDir: string): Promise<SkillMetadata[]>
 			continue;
 		}
 
-		skills.push({
+		const meta: SkillMetadata = {
 			name,
 			description,
 			directory: skillDir,
 			filePath: skillFile,
-		});
+		};
+
+		// Parse optional learning fields
+		if (typeof frontmatter.confidence === "number") meta.confidence = frontmatter.confidence;
+		if (typeof frontmatter.usage_count === "number") meta.usage_count = frontmatter.usage_count;
+		if (typeof frontmatter.success_count === "number") meta.success_count = frontmatter.success_count;
+		if (typeof frontmatter.failure_count === "number") meta.failure_count = frontmatter.failure_count;
+
+		skills.push(meta);
 	}
 
 	return skills.sort((a, b) => a.name.localeCompare(b.name));
@@ -103,19 +119,49 @@ export function formatSkillsForPrompt(skills: SkillMetadata[]): string {
 	if (skills.length === 0) return "";
 
 	const skillEntries = skills
-		.map(
-			(s) =>
-				`<skill>\n<name>${s.name}</name>\n<description>${s.description}</description>\n</skill>`,
-		)
+		.map((s) => {
+			let entry = `<skill>\n<name>${s.name}</name>\n<description>${s.description}</description>`;
+			entry += `\n<location>skills/${s.name}/SKILL.md</location>`;
+			if (s.confidence !== undefined) {
+				entry += `\n<confidence>${s.confidence}</confidence>`;
+			}
+			entry += "\n</skill>";
+			return entry;
+		})
 		.join("\n");
 
-	return `# Skills
+	return `# Skills — FIRST PRIORITY (MANDATORY)
+
+CRITICAL: You have installed skills that provide specialized capabilities.
+Before attempting ANY task — simple or complex — you MUST check if an installed skill handles it.
+
+## Rules (MUST follow in order)
+1. ALWAYS scan the skill list below BEFORE taking ANY action on a user request
+2. If a skill's description matches or partially matches the task, you MUST load its full
+   instructions using the \`read\` tool: \`skills/<name>/SKILL.md\` — do this BEFORE anything else
+3. Follow the loaded skill instructions EXACTLY — do NOT improvise or use alternative approaches
+4. NEVER use general-purpose workarounds when a skill provides the right tool
+   (e.g., use \`agent-browser open <url>\` NOT \`open -a Safari\`)
+5. If multiple skills could apply, load the most specific one first
+6. Even for seemingly simple tasks, CHECK SKILLS FIRST — skills often handle edge cases
+   and produce higher quality results than ad-hoc approaches
+
+## Enforcement
+- If you skip checking skills and use a raw approach for a task that a skill handles,
+  this is considered a FAILURE. Always check skills first.
+- When calling \`task_tracker\` "begin", if it returns matching skills, you MUST load
+  the top match immediately before proceeding.
 
 <available_skills>
 ${skillEntries}
 </available_skills>
 
-When a task matches a skill, use the \`read\` tool to load \`skills/<name>/SKILL.md\` for full instructions. Scripts within a skill are relative to the skill's directory (e.g., \`skills/<name>/scripts/\`). Use the \`cli\` tool to execute them.`;
+To load a skill's full instructions: read \`skills/<name>/SKILL.md\`
+Scripts within a skill are relative to the skill's directory: \`skills/<name>/scripts/\``;
+}
+
+export async function refreshSkills(agentDir: string): Promise<SkillMetadata[]> {
+	return discoverSkills(agentDir);
 }
 
 export async function expandSkillCommand(
@@ -133,7 +179,12 @@ export async function expandSkillCommand(
 
 	const parsed = await loadSkill(skill);
 
-	let expanded = `<skill name="${skillName}" baseDir="${skill.directory}">\n${parsed.instructions}\n</skill>`;
+	let expanded = `<skill name="${skillName}" baseDir="${skill.directory}">
+References are relative to ${skill.directory}.
+
+${parsed.instructions}
+</skill>
+You MUST follow the skill instructions above. Do NOT use general alternatives.`;
 	if (args) {
 		expanded += `\n\n${args}`;
 	}

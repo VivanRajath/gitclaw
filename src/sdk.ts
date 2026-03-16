@@ -180,6 +180,7 @@ export function query(options: QueryOptions): Query {
 				dir,
 				timeout: loaded.manifest.runtime.timeout,
 				sandbox: sandboxCtx,
+				gitagentDir: loaded.gitagentDir,
 			});
 		}
 
@@ -197,8 +198,11 @@ export function query(options: QueryOptions): Query {
 
 		// SDK-provided tools
 		if (options.tools) {
-			tools = [...tools, ...options.tools.map(toAgentTool)];
+			const converted = options.tools.map(toAgentTool);
+			tools = [...tools, ...converted];
+			console.error(`[sdk] Injected ${converted.length} external tools: ${converted.map(t => t.name).join(", ")}`);
 		}
+		console.error(`[sdk] Total tools before filtering: ${tools.length} → ${tools.map(t => t.name).join(", ")}`);
 
 		// Filter by allowlist/denylist
 		if (options.allowedTools) {

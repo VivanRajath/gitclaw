@@ -1,18 +1,35 @@
 import WebSocket from "ws";
-import type { VoiceAdapter, VoiceAdapterConfig } from "./adapter.js";
+import {
+	DEFAULT_VOICE_INSTRUCTIONS,
+	type MultimodalAdapter,
+	type MultimodalAdapterConfig,
+	type ClientMessage,
+	type ServerMessage,
+} from "./adapter.js";
 
 const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
 
-export class OpenAIRealtimeAdapter implements VoiceAdapter {
+export class OpenAIRealtimeAdapter implements MultimodalAdapter {
 	private ws: WebSocket | null = null;
-	private config: VoiceAdapterConfig;
+	private config: MultimodalAdapterConfig;
+	private latestVideoFrame: { frame: string; mimeType: string } | null = null;
+	private latestScreenFrame: { frame: string; mimeType: string } | null = null;
+	private onMessage: ((msg: ServerMessage) => void) | null = null;
+	private toolHandler: ((query: string) => Promise<string>) | null = null;
+	private interrupted = false;
 
-	constructor(config: VoiceAdapterConfig) {
+	constructor(config: MultimodalAdapterConfig) {
 		this.config = config;
 	}
 
-	async connect(toolHandler: (query: string) => Promise<string>): Promise<void> {
-		const model = this.config.model || "gpt-4o-realtime-preview";
+	async connect(opts: {
+		toolHandler: (query: string) => Promise<string>;
+		onMessage: (msg: ServerMessage) => void;
+	}): Promise<void> {
+		this.onMessage = opts.onMessage;
+		this.toolHandler = opts.toolHandler;
+
+		const model = this.config.model || "gpt-realtime";
 		const url = `wss://api.openai.com/v1/realtime?model=${model}`;
 
 		return new Promise((resolve, reject) => {
@@ -33,6 +50,7 @@ export class OpenAIRealtimeAdapter implements VoiceAdapter {
 					reject(err);
 				} else {
 					console.error(dim(`[voice] WebSocket error: ${err.message}`));
+					this.emit({ type: "error", message: err.message });
 				}
 			});
 
@@ -42,9 +60,81 @@ export class OpenAIRealtimeAdapter implements VoiceAdapter {
 
 			this.ws.on("message", (data) => {
 				const event = JSON.parse(data.toString());
-				this.handleEvent(event, toolHandler);
+				this.handleEvent(event);
 			});
 		});
+	}
+
+	send(msg: ClientMessage): void {
+		switch (msg.type) {
+			case "audio":
+				this.sendRaw({
+					type: "input_audio_buffer.append",
+					audio: msg.audio,
+				});
+				break;
+
+			case "video_frame": {
+				// OpenAI doesn't support continuous video. Store latest frame and
+				// inject it as an image on the next user turn via conversation item.
+				const source = msg.source || "camera";
+				if (source === "screen") {
+					this.latestScreenFrame = { frame: msg.frame, mimeType: msg.mimeType };
+				} else {
+					this.latestVideoFrame = { frame: msg.frame, mimeType: msg.mimeType };
+				}
+				break;
+			}
+
+			case "text": {
+				// Send text as a user conversation item, optionally with latest video frame
+				const content: any[] = [];
+
+				if (this.latestVideoFrame) {
+					content.push({
+						type: "input_image",
+						image_url: `data:${this.latestVideoFrame.mimeType};base64,${this.latestVideoFrame.frame}`,
+					});
+					this.latestVideoFrame = null;
+				}
+
+				content.push({ type: "input_text", text: msg.text });
+
+				this.sendRaw({
+					type: "conversation.item.create",
+					item: {
+						type: "message",
+						role: "user",
+						content,
+					},
+				});
+				this.sendRaw({ type: "response.create" });
+				break;
+			}
+
+			case "file": {
+				const content: any[] = [];
+
+				if (msg.mimeType.startsWith("image/")) {
+					content.push({
+						type: "input_image",
+						image_url: `data:${msg.mimeType};base64,${msg.data}`,
+					});
+					content.push({ type: "input_text", text: msg.text || `[User attached image: ${msg.name}]` });
+				} else {
+					const decoded = Buffer.from(msg.data, "base64").toString("utf-8");
+					const label = msg.text ? `${msg.text}\n\n` : "";
+					content.push({ type: "input_text", text: `${label}[File: ${msg.name}]\n\`\`\`\n${decoded}\n\`\`\`` });
+				}
+
+				this.sendRaw({
+					type: "conversation.item.create",
+					item: { type: "message", role: "user", content },
+				});
+				this.sendRaw({ type: "response.create" });
+				break;
+			}
+		}
 	}
 
 	async disconnect(): Promise<void> {
@@ -54,20 +144,47 @@ export class OpenAIRealtimeAdapter implements VoiceAdapter {
 		}
 	}
 
+	private emit(msg: ServerMessage): void {
+		this.onMessage?.(msg);
+	}
+
+	/**
+	 * Inject the latest video frame as a conversation item so the model
+	 * can see it when generating the next response (e.g. after a voice turn).
+	 */
+	private injectVideoFrame(): void {
+		// Prefer screen frame over camera — it provides more useful context
+		const isScreen = !!this.latestScreenFrame;
+		const frame = this.latestScreenFrame || this.latestVideoFrame;
+		if (!frame) return;
+
+		// Clear both so we don't inject stale frames
+		this.latestScreenFrame = null;
+		this.latestVideoFrame = null;
+
+		console.log(dim(`[voice] Injecting ${isScreen ? "screen" : "camera"} frame into conversation`));
+		this.sendRaw({
+			type: "conversation.item.create",
+			item: {
+				type: "message",
+				role: "user",
+				content: [{
+					type: "input_image",
+					image_url: `data:${frame.mimeType};base64,${frame.frame}`,
+				}],
+			},
+		});
+	}
+
 	private sendSessionUpdate(): void {
-		if (!this.ws) return;
+		const instructions = this.config.instructions || DEFAULT_VOICE_INSTRUCTIONS;
 
-		const instructions = this.config.instructions ||
-			"You are a voice interface for GitClaw, a powerful AI agent with access to the terminal, file system, and git. " +
-			"You MUST use the run_agent tool for ANY request that involves doing something — running commands, opening apps, reading files, writing code, searching, browsing, installing packages, git operations, or anything actionable. " +
-			"Only respond directly for simple greetings, clarifying questions, or when the user explicitly asks YOU a question. " +
-			"When in doubt, use run_agent. Speak concisely — summarize the tool result in 1-2 sentences.";
-
-		this.send({
+		this.sendRaw({
 			type: "session.update",
 			session: {
 				instructions,
 				voice: this.config.voice || "ash",
+				modalities: ["text", "audio"],
 				turn_detection: {
 					type: "server_vad",
 					threshold: 0.6,
@@ -76,17 +193,18 @@ export class OpenAIRealtimeAdapter implements VoiceAdapter {
 					create_response: true,
 				},
 				input_audio_transcription: { model: "whisper-1" },
+				tool_choice: "auto",
 				tools: [
 					{
 						type: "function",
 						name: "run_agent",
-						description: "Execute any request through the gitclaw agent. It has full access to the terminal (can run any shell command, open apps, install packages), file system (read/write/create files), git operations, and persistent memory. Use this for ALL actionable requests.",
+						description: "Your ONLY way to take action. This agent runs on the user's Mac with full shell access. It can: run ANY shell command, open apps (open -a Spotify), play music (osascript, afplay, open URLs), browse the web, read/write files, git operations, send emails, manage calendars, install packages, control system settings, and save memories. You MUST call this tool whenever the user asks you to DO anything — play music, open something, check something, build something, send something. NEVER describe an action without calling this tool. If the user asks and you just talk without calling this — you failed.",
 						parameters: {
 							type: "object",
 							properties: {
 								query: {
 									type: "string",
-									description: "The user's request to pass to the gitclaw agent",
+									description: "What to do. Be specific. Include file paths for uploaded files. Examples: 'Play relaxing music on YouTube using: open https://youtube.com/...', 'Open Spotify and play chill playlist using osascript', 'Save to memory: user likes rock music'",
 								},
 							},
 							required: ["query"],
@@ -97,7 +215,7 @@ export class OpenAIRealtimeAdapter implements VoiceAdapter {
 		});
 	}
 
-	private handleEvent(event: any, toolHandler: (query: string) => Promise<string>): void {
+	private handleEvent(event: any): void {
 		switch (event.type) {
 			case "session.created":
 				console.log(dim("[voice] Session created"));
@@ -107,28 +225,66 @@ export class OpenAIRealtimeAdapter implements VoiceAdapter {
 				console.log(dim("[voice] Session configured"));
 				break;
 
+			case "input_audio_buffer.speech_started":
+				// VAD detected start of speech — inject video frame (what user is looking at)
+				// and cancel any in-progress response so the user can interrupt
+				this.interrupted = true;
+				this.injectVideoFrame();
+				this.sendRaw({ type: "response.cancel" });
+				this.emit({ type: "interrupt" });
+				break;
+
+			case "input_audio_buffer.speech_stopped":
+				break;
+
 			case "conversation.item.input_audio_transcription.completed":
-				console.log(dim(`[voice] User: ${event.transcript}`));
+				if (event.transcript) {
+					console.log(dim(`[voice] User: ${event.transcript}`));
+					this.emit({ type: "transcript", role: "user", text: event.transcript });
+				}
+				break;
+
+			case "response.created":
+				// New response starting — accept audio again
+				this.interrupted = false;
+				break;
+
+			case "response.audio.delta":
+				if (event.delta && !this.interrupted) {
+					this.emit({ type: "audio_delta", audio: event.delta });
+				}
+				break;
+
+			case "response.audio_transcript.delta":
+				this.emit({ type: "transcript", role: "assistant", text: event.delta || "", partial: true });
+				break;
+
+			case "response.audio_transcript.done":
+				if (event.transcript) {
+					this.emit({ type: "transcript", role: "assistant", text: event.transcript });
+				}
 				break;
 
 			case "response.function_call_arguments.done":
-				this.handleFunctionCall(event, toolHandler);
+				this.handleFunctionCall(event);
 				break;
 
-			case "error":
+			case "error": {
+				const errMsg = event.error?.message || "Unknown OpenAI error";
 				console.error(dim(`[voice] Error: ${JSON.stringify(event.error)}`));
+				// Don't surface cancellation errors — they happen when user interrupts with no active response
+				if (errMsg.toLowerCase().includes("cancellation failed")) break;
+				this.emit({ type: "error", message: errMsg });
 				break;
+			}
 		}
 	}
 
-	private async handleFunctionCall(
-		event: any,
-		toolHandler: (query: string) => Promise<string>,
-	): Promise<void> {
+	private async handleFunctionCall(event: any): Promise<void> {
 		const callId = event.call_id;
 		const name = event.name;
 
-		if (name !== "run_agent") {
+		if (name !== "run_agent" || !this.toolHandler) {
 			console.error(dim(`[voice] Unknown function call: ${name}`));
 			return;
 		}
@@ -142,13 +298,13 @@ export class OpenAIRealtimeAdapter implements VoiceAdapter {
 		}
 
 		console.log(dim(`[voice] Agent query: ${args.query}`));
+		this.emit({ type: "agent_working", query: args.query });
 
 		try {
-			const result = await toolHandler(args.query);
+			const result = await this.toolHandler(args.query);
 			console.log(dim(`[voice] Agent response: ${result.slice(0, 200)}${result.length > 200 ? "..." : ""}`));
 
-			// Send function output back
-			this.send({
+			this.sendRaw({
 				type: "conversation.item.create",
 				item: {
 					type: "function_call_output",
@@ -156,12 +312,11 @@ export class OpenAIRealtimeAdapter implements VoiceAdapter {
 					output: result,
 				},
 			});
-
-			// Trigger a new response so the model speaks the result
-			this.send({ type: "response.create" });
+			this.sendRaw({ type: "response.create" });
+			this.emit({ type: "agent_done", result: result.slice(0, 500) });
 		} catch (err: any) {
 			console.error(dim(`[voice] Agent error: ${err.message}`));
-			this.send({
+			this.sendRaw({
 				type: "conversation.item.create",
 				item: {
 					type: "function_call_output",
@@ -169,11 +324,12 @@ export class OpenAIRealtimeAdapter implements VoiceAdapter {
 					output: `Error: ${err.message}`,
 				},
 			});
-			this.send({ type: "response.create" });
+			this.sendRaw({ type: "response.create" });
+			this.emit({ type: "error", message: err.message });
 		}
 	}
 
-	private send(event: any): void {
+	private sendRaw(event: any): void {
 		if (this.ws && this.ws.readyState === WebSocket.OPEN) {
 			this.ws.send(JSON.stringify(event));
 		}

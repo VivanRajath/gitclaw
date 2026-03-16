@@ -265,7 +265,7 @@ export async function loadAgent(
 	if (agentsMd) parts.push(agentsMd);
 
 	parts.push(
-		`# Memory\n\nYou have a memory file at memory/MEMORY.md. Use the \`memory\` tool to load and save memories. Each save creates a git commit, so your memory has full history. You can also use the \`cli\` tool to run git commands for deeper memory inspection (git log, git diff, git show).`,
+		`# Memory\n\nYou have a memory file at memory/MEMORY.md. Use the \`memory\` tool to load and save memories. Each save creates a git commit, so your memory has full history. You can also use the \`cli\` tool to run git commands for deeper memory inspection (git log, git diff, git show).\n\nYour memories define who you are. When you have none, you are newly awakened — curious and eager to understand the person you're talking to. As memories grow, so do you. Save memories proactively when you learn something meaningful about the user.`,
 	);
 
 	// Discover and load knowledge
@@ -311,6 +311,41 @@ export async function loadAgent(
 	// Load compliance context (Phase 3)
 	const complianceBlock = await loadComplianceContext(agentDir);
 	if (complianceBlock) parts.push(complianceBlock);
+
+	// Workspace directory — all generated files go here
+	parts.push(`# Workspace Directory
+
+ALL files you create (documents, PDFs, images, spreadsheets, code output, exports, assets, etc.) MUST be written to the \`workspace/\` directory.
+- Create the directory if it doesn't exist: \`workspace/\`
+- Example: \`workspace/report.pdf\`, \`workspace/chart.png\`, \`workspace/data.csv\`
+- NEVER write generated files to the project root, home directory, desktop, or any other location
+- The \`workspace/\` directory is the designated output folder for all user-requested artifacts
+- This rule applies to ALL channels: voice, chat, Telegram, WhatsApp`);
+
+	// Task learning & skill discovery
+	parts.push(`# Task Learning & Skill Discovery
+
+You have an intelligent learning system. For ANY task the user gives you:
+
+1. FIRST: Call \`task_tracker\` action "begin" with your objective — this searches for existing skills
+2. If a matching skill is found, you MUST load and follow its instructions BEFORE doing anything else
+3. Call \`task_tracker\` action "update" after each significant step
+4. Call \`task_tracker\` action "end" to report the outcome (success/failure/partial)
+
+IMPORTANT: Do NOT skip step 1. Even for tasks that seem simple, always check for skills first.
+Skills encode tested approaches and handle edge cases you might miss with ad-hoc solutions.
+
+On SUCCESS:
+- Call \`skill_learner\` action "evaluate" to check if this approach is worth saving
+- If worthy, call \`skill_learner\` action "crystallize" to save it as a reusable skill
+- The skill will be available in future sessions via /skill:<name>
+
+On FAILURE:
+- Record why it failed. Try a different approach.
+- Failed approaches become negative examples — they won't be repeated
+
+If you used an existing skill, report it via skill_used so confidence adjusts based on the outcome.
+Do NOT track trivial single-command tasks (e.g. "what time is it"). But DO check skills for any task that involves creating, building, or modifying something.`);
 
 	const systemPrompt = parts.join("\n\n");
 

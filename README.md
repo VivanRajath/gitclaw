@@ -12,11 +12,12 @@
 <h1 align="center">Gitclaw</h1>
 
 <p align="center">
-  <strong>A universal git-native AI agent framework.</strong><br/>
+  <strong>A universal git-native multimodal always learning AI Agent (TinyHuman)</strong><br/>
   Your agent lives inside a git repo — identity, rules, memory, tools, and skills are all version-controlled files.
 </p>
 
 <p align="center">
+  <a href="#one-command-install">Install</a> &bull;
   <a href="#quick-start">Quick Start</a> &bull;
   <a href="#sdk">SDK</a> &bull;
   <a href="#architecture">Architecture</a> &bull;
@@ -41,7 +42,22 @@ Most agent frameworks treat configuration as code scattered across your applicat
 
 Fork an agent. Branch a personality. `git log` your agent's memory. Diff its rules. This is **agents as repos**.
 
-## Install
+## One-Command Install
+
+Copy, paste, run. That's it — no cloning, no manual setup. The installer handles everything:
+
+```bash
+bash <(curl -fsSL "https://raw.githubusercontent.com/open-gitagent/gitclaw/main/install.sh?$(date +%s)")
+```
+
+This will:
+- Install gitclaw globally via npm
+- Walk you through API key setup (Quick or Advanced mode)
+- Launch the voice UI in your browser at `http://localhost:3333`
+
+> **Requirements:** Node.js 18+, npm, git
+
+### Or install manually:
 
 ```bash
 npm install -g gitclaw
