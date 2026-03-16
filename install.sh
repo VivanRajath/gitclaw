@@ -143,9 +143,8 @@ if [ -d "$PROJECT_DIR" ] && [ -f "$PROJECT_DIR/agent.yaml" ]; then
     echo -e "  ${GREEN}✓${NC} Loaded keys from ${DIM}${PROJECT_DIR}/.env${NC}"
   fi
 
-  # Extract model from agent.yaml (look for preferred: "..." under model:)
-  MODEL=$(grep -A1 '^model:' "$PROJECT_DIR/agent.yaml" | grep 'preferred:' | sed 's/.*preferred:[[:space:]]*["'"'"']\?\([^"'"'"']*\)["'"'"']\?.*/\1/' | head -1)
-  MODEL="${MODEL:-anthropic:claude-sonnet-4-6}"
+  # Let loadAgent() read model directly from agent.yaml — no extraction needed
+  MODEL=""
 
   # Determine adapter from available keys
   if [ -n "${GEMINI_API_KEY:-}" ] && [ -z "${OPENAI_API_KEY:-}" ]; then
@@ -417,4 +416,8 @@ echo ""
 
 (sleep 2 && open_browser) &
 
-exec gitclaw --model "$MODEL" --voice --dir "$PROJECT_DIR"
+if [ -n "$MODEL" ]; then
+  exec gitclaw --model "$MODEL" --voice --dir "$PROJECT_DIR"
+else
+  exec gitclaw --voice --dir "$PROJECT_DIR"
+fi

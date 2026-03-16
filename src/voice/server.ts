@@ -435,7 +435,7 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 			const { tools: composioTools, promptSuffix: composioPromptSuffix } = await getComposioContext(prompt);
 
 			let systemPromptSuffix = getCurrentDateTimeContext();
-			systemPromptSuffix += "\nIMPORTANT: All files you create (PDFs, images, documents, code output, etc.) MUST be written to the workspace/ directory. Never write to the project root or other locations.";
+			systemPromptSuffix += "\nWhen creating files (PDFs, images, documents, code output, etc.), write them to the workspace/ directory by default. If the user explicitly specifies a different path, use the path they requested.";
 			if (whatsappSock && whatsappConnected) {
 				systemPromptSuffix += "\nYou can send WhatsApp messages using the send_whatsapp_message tool and set up auto-response triggers using create_trigger.";
 			} else {
