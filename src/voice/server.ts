@@ -2429,6 +2429,7 @@ a{color:#58a6ff;}</style></head>
 				const added = after.filter(d => !before.has(d));
 				const skillNames = added.length ? added : [cleanSource.split("/")[1] || cleanSource];
 				console.log(dim(`[voice] Installed skill(s): ${skillNames.join(", ")} via npx skills add`));
+				broadcastToBrowsers({ type: "files_changed" } as any);
 				jsonReply(res, 200, { ok: true, skillName: skillNames.join(", "), path: `skills/`, installed: skillNames });
 			} catch (err: any) {
 				jsonReply(res, 500, { error: err.message });
