@@ -29,7 +29,7 @@ export class OpenAIRealtimeAdapter implements MultimodalAdapter {
 		this.onMessage = opts.onMessage;
 		this.toolHandler = opts.toolHandler;
 
-		const model = this.config.model || "gpt-4o-realtime-preview";
+		const model = this.config.model || "gpt-realtime-1.5";
 		const url = `wss://api.openai.com/v1/realtime?model=${model}`;
 
 		// Try direct WebSocket with headers first (native Node.js / real server)
@@ -51,6 +51,10 @@ export class OpenAIRealtimeAdapter implements MultimodalAdapter {
 		}
 
 		// Fallback: get an ephemeral session token via REST (fetch headers work everywhere)
+		const keyPreview = this.config.apiKey
+			? `${this.config.apiKey.slice(0, 7)}...${this.config.apiKey.slice(-4)} (${this.config.apiKey.length} chars)`
+			: "(empty)";
+		console.log(dim(`[voice] API key: ${keyPreview}`));
 		const sessionResp = await fetch("https://api.openai.com/v1/realtime/sessions", {
 			method: "POST",
 			headers: {
