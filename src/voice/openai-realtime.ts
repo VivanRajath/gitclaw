@@ -29,7 +29,7 @@ export class OpenAIRealtimeAdapter implements MultimodalAdapter {
 		this.onMessage = opts.onMessage;
 		this.toolHandler = opts.toolHandler;
 
-		const model = this.config.model || "gpt-realtime-1.5";
+		const model = this.config.model || "gpt-realtime-2025-08-28";
 		const url = `wss://api.openai.com/v1/realtime?model=${model}`;
 
 		// Try direct WebSocket with headers first (native Node.js / real server)
