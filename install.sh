@@ -135,12 +135,46 @@ PROJECT_DIR="${HOME}/assistant"
 if [ -d "$PROJECT_DIR" ] && [ -f "$PROJECT_DIR/agent.yaml" ]; then
   echo -e "  ${GREEN}✓${NC} Found existing assistant at ${DIM}${PROJECT_DIR}${NC}"
 
-  # Re-export .env keys into current shell
+  # Re-export .env keys into current shell (strip Windows \r line endings)
   if [ -f "$PROJECT_DIR/.env" ]; then
+    sed -i.bak 's/\r$//' "$PROJECT_DIR/.env" && rm -f "$PROJECT_DIR/.env.bak"
     set -a
     source "$PROJECT_DIR/.env"
     set +a
     echo -e "  ${GREEN}✓${NC} Loaded keys from ${DIM}${PROJECT_DIR}/.env${NC}"
+  fi
+
+  # Prompt for missing required keys
+  if [ -z "${OPENAI_API_KEY:-}" ] && [ -z "${GEMINI_API_KEY:-}" ]; then
+    echo ""
+    echo -e "  ${YELLOW}⚠${NC}  No voice API key found."
+    echo -e "  ${BOLD}OpenAI API Key${NC} ${DIM}(for voice — get one at platform.openai.com)${NC}"
+    read -rsp "  Key: " OPENAI_KEY
+    echo ""
+    if [ -z "$OPENAI_KEY" ]; then
+      echo -e "  ${RED}✗ OpenAI or Gemini key is required for voice mode${NC}"
+      exit 1
+    fi
+    export OPENAI_API_KEY="$OPENAI_KEY"
+    echo -e "  ${GREEN}✓${NC} OPENAI_API_KEY saved"
+    # Append to .env for future runs
+    echo "OPENAI_API_KEY=${OPENAI_API_KEY}" >> "$PROJECT_DIR/.env"
+  fi
+
+  if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+    echo ""
+    echo -e "  ${YELLOW}⚠${NC}  No Anthropic API key found."
+    echo -e "  ${BOLD}Anthropic API Key${NC} ${DIM}(for agent brain — get one at console.anthropic.com)${NC}"
+    read -rsp "  Key: " ANTHROPIC_KEY
+    echo ""
+    if [ -z "$ANTHROPIC_KEY" ]; then
+      echo -e "  ${RED}✗ Anthropic key is required for the agent${NC}"
+      exit 1
+    fi
+    export ANTHROPIC_API_KEY="$ANTHROPIC_KEY"
+    echo -e "  ${GREEN}✓${NC} ANTHROPIC_API_KEY saved"
+    # Append to .env for future runs
+    echo "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}" >> "$PROJECT_DIR/.env"
   fi
 
   # Let loadAgent() read model directly from agent.yaml — no extraction needed
